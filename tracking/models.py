@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+from uuid import uuid4
 
 
 class LocationUpdate(models.Model):
@@ -180,3 +181,75 @@ class AppUsageSnapshot(models.Model):
 
     def __str__(self):
         return f"{self.child.username}: {self.app_name} {self.usage_date}"
+
+
+class RemoteDeviceCommand(models.Model):
+    TYPE_LOUD = "loud"
+    TYPE_AROUND_START = "around_start"
+    TYPE_AROUND_STOP = "around_stop"
+    TYPE_CHOICES = [
+        (TYPE_LOUD, "Loud"),
+        (TYPE_AROUND_START, "Around Start"),
+        (TYPE_AROUND_STOP, "Around Stop"),
+    ]
+
+    STATUS_PENDING = "pending"
+    STATUS_DELIVERED = "delivered"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_DELIVERED, "Delivered"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    child = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="device_commands",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="issued_device_commands",
+    )
+    command_type = models.CharField(max_length=32, choices=TYPE_CHOICES)
+    payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"{self.child.username}: {self.command_type} ({self.status})"
+
+
+class AroundAudioClip(models.Model):
+    child = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="around_audio_clips",
+    )
+    session_token = models.CharField(max_length=64, default="", db_index=True)
+    audio = models.FileField(upload_to="around_audio/")
+    duration_seconds = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    @staticmethod
+    def new_session_token():
+        return uuid4().hex
+
+    def __str__(self):
+        return f"{self.child.username}: around audio {self.id}"
