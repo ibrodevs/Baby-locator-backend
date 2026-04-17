@@ -2,6 +2,8 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    AlertReadAllView,
+    AlertReadView,
     AllChildrenLocationsView,
     AroundAudioUploadView,
     ChildActivityView,
@@ -14,6 +16,7 @@ from .views import (
     ChildStatsSummaryView,
     CompleteDeviceCommandView,
     LatestAroundAudioView,
+    ParentAlertsView,
     PendingDeviceCommandsView,
     SafeZoneViewSet,
     ShareLocationView,
@@ -38,4 +41,7 @@ urlpatterns = [
     path("children/<int:child_id>/safety-score/", ChildSafetyScoreView.as_view()),
     path("children/<int:child_id>/stats/", ChildStatsSummaryView.as_view()),
     path("children/<int:child_id>/app-limits/", ChildAppLimitView.as_view()),
+    path("alerts/", ParentAlertsView.as_view()),
+    path("alerts/<int:alert_id>/read/", AlertReadView.as_view()),
+    path("alerts/read-all/", AlertReadAllView.as_view()),
 ]

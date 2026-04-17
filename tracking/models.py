@@ -233,6 +233,39 @@ class RemoteDeviceCommand(models.Model):
         return f"{self.child.username}: {self.command_type} ({self.status})"
 
 
+class Alert(models.Model):
+    """Persistent server-side alert for parent notification."""
+
+    TYPE_BATTERY_LOW = "battery_low"
+    TYPE_SAFE_ZONE_EXIT = "safe_zone_exit"
+    TYPE_CHOICES = [
+        (TYPE_BATTERY_LOW, "Battery Low"),
+        (TYPE_SAFE_ZONE_EXIT, "Safe Zone Exit"),
+    ]
+
+    child = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="alerts",
+    )
+    parent = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="parent_alerts",
+    )
+    alert_type = models.CharField(max_length=32, choices=TYPE_CHOICES)
+    title = models.CharField(max_length=200)
+    message = models.CharField(max_length=500, blank=True)
+    read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.child.username}: {self.alert_type} ({self.created_at})"
+
+
 class AroundAudioClip(models.Model):
     child = models.ForeignKey(
         settings.AUTH_USER_MODEL,

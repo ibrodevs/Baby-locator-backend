@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import (
+    Alert,
     AppLimit,
     AppUsageSnapshot,
     AroundAudioClip,
@@ -202,6 +203,28 @@ class RemoteDeviceCommandActionSerializer(serializers.Serializer):
 class RemoteDeviceCommandCompleteSerializer(serializers.Serializer):
     success = serializers.BooleanField(required=False, default=True)
     error_message = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class AlertSerializer(serializers.ModelSerializer):
+    child_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Alert
+        fields = [
+            "id",
+            "child",
+            "parent",
+            "alert_type",
+            "title",
+            "message",
+            "read",
+            "child_name",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_child_name(self, obj):
+        return obj.child.display_name or obj.child.username
 
 
 class AroundAudioClipSerializer(serializers.ModelSerializer):

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AppLimit, AppUsageSnapshot, DeviceDailySummary, DeviceStatus, LocationUpdate
+from .models import Alert, AppLimit, AppUsageSnapshot, DeviceDailySummary, DeviceStatus, LocationUpdate
 
 
 @admin.register(LocationUpdate)
@@ -44,3 +44,10 @@ class AppUsageSnapshotAdmin(admin.ModelAdmin):
     list_display = ("child", "usage_date", "app_name", "usage_minutes", "last_used_at")
     list_filter = ("usage_date", "child")
     search_fields = ("child__username", "app_name", "package_name")
+
+
+@admin.register(Alert)
+class AlertAdmin(admin.ModelAdmin):
+    list_display = ("child", "parent", "alert_type", "title", "read", "created_at")
+    list_filter = ("alert_type", "read")
+    search_fields = ("child__username", "title", "message")

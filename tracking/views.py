@@ -17,6 +17,7 @@ from accounts.models import User
 from accounts.serializers import UserSerializer
 
 from .models import (
+    Alert,
     AppLimit,
     AppUsageSnapshot,
     AroundAudioClip,
@@ -27,6 +28,7 @@ from .models import (
     SafeZone,
 )
 from .serializers import (
+    AlertSerializer,
     AppLimitSerializer,
     AppLimitWriteSerializer,
     AroundAudioClipSerializer,
@@ -112,8 +114,13 @@ class SafeZoneViewSet(viewsets.ModelViewSet):
 
 
 class ShareLocationView(APIView):
-    # ... (unchanged)
     """Child posts their current location."""
+
+    BATTERY_LOW_THRESHOLD = 20
+    # Suppress duplicate battery_low alerts for 30 minutes.
+    BATTERY_ALERT_COOLDOWN = timedelta(minutes=30)
+    # Suppress duplicate safe zone exit alerts for 10 minutes per zone.
+    ZONE_EXIT_COOLDOWN = timedelta(minutes=10)
 
     def post(self, request):
         if request.user.role != User.ROLE_CHILD:
@@ -128,7 +135,76 @@ class ShareLocationView(APIView):
             battery=s.validated_data.get("battery"),
             active=s.validated_data.get("active", True),
         )
+
+        # --- Generate alerts for the parent ---
+        parent = request.user.parent
+        if parent:
+            self._check_battery_alert(request.user, parent, loc)
+            self._check_zone_exit_alert(request.user, parent, loc)
+
         return Response(LocationSerializer(loc).data, status=201)
+
+    def _check_battery_alert(self, child, parent, loc):
+        if loc.battery is None or loc.battery > self.BATTERY_LOW_THRESHOLD:
+            return
+        cutoff = timezone.now() - self.BATTERY_ALERT_COOLDOWN
+        already = Alert.objects.filter(
+            child=child,
+            parent=parent,
+            alert_type=Alert.TYPE_BATTERY_LOW,
+            created_at__gte=cutoff,
+        ).exists()
+        if already:
+            return
+        child_name = child.display_name or child.username
+        Alert.objects.create(
+            child=child,
+            parent=parent,
+            alert_type=Alert.TYPE_BATTERY_LOW,
+            title=f"{child_name}: низкий заряд батареи",
+            message=f"Уровень заряда {loc.battery}%",
+        )
+
+    def _check_zone_exit_alert(self, child, parent, loc):
+        zones = list(SafeZone.objects.filter(parent=parent, active=True))
+        if not zones:
+            return
+        # Check if child is currently inside any zone
+        current_zone = _match_zone_for_location(zones, loc)
+        if current_zone is not None:
+            return  # Still inside a zone, no alert needed.
+
+        # Check previous location to see if they WERE in a zone
+        prev_loc = (
+            child.locations.filter(created_at__lt=loc.created_at)
+            .order_by("-created_at")
+            .first()
+        )
+        if prev_loc is None:
+            return
+        prev_zone = _match_zone_for_location(zones, prev_loc)
+        if prev_zone is None:
+            return  # Was not in a zone before either
+
+        # Child just left prev_zone — check cooldown
+        cutoff = timezone.now() - self.ZONE_EXIT_COOLDOWN
+        already = Alert.objects.filter(
+            child=child,
+            parent=parent,
+            alert_type=Alert.TYPE_SAFE_ZONE_EXIT,
+            message__contains=prev_zone.name,
+            created_at__gte=cutoff,
+        ).exists()
+        if already:
+            return
+        child_name = child.display_name or child.username
+        Alert.objects.create(
+            child=child,
+            parent=parent,
+            alert_type=Alert.TYPE_SAFE_ZONE_EXIT,
+            title=f"{child_name}: вышел из безопасной зоны",
+            message=f"Покинул зону «{prev_zone.name}»",
+        )
 
 
 class ChildLatestLocationView(APIView):
@@ -745,3 +821,36 @@ class LatestAroundAudioView(APIView):
         return Response(
             AroundAudioClipSerializer(clip, context={"request": request}).data,
         )
+
+
+class ParentAlertsView(APIView):
+    """Parent fetches unread alerts for all their children."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role != User.ROLE_PARENT:
+            return Response({"detail": "parents only"}, status=403)
+        alerts = request.user.parent_alerts.filter(read=False).order_by("-created_at")[:50]
+        return Response(AlertSerializer(alerts, many=True).data)
+
+
+class AlertReadView(APIView):
+    """Mark an alert as read."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, alert_id):
+        alert = get_object_or_404(Alert, id=alert_id, parent=request.user)
+        alert.read = True
+        alert.save(update_fields=["read"])
+        return Response({"detail": "ok"})
+
+
+class AlertReadAllView(APIView):
+    """Mark all alerts as read."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.role != User.ROLE_PARENT:
+            return Response({"detail": "parents only"}, status=403)
+        request.user.parent_alerts.filter(read=False).update(read=True)
+        return Response({"detail": "ok"})
