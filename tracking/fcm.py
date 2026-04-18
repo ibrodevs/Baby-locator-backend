@@ -30,8 +30,8 @@ def _ensure_firebase():
         return False
 
 
-def send_loud_push(fcm_token: str):
-    """Send a data-only FCM message to trigger loud alarm on the child device."""
+def send_command_push(fcm_token: str, command_type: str):
+    """Send a high-priority data-only FCM message to wake the child device."""
     if not fcm_token:
         return
     if not _ensure_firebase():
@@ -42,7 +42,7 @@ def send_loud_push(fcm_token: str):
         from firebase_admin import messaging
 
         message = messaging.Message(
-            data={"command_type": "loud"},
+            data={"command_type": command_type},
             token=fcm_token,
             android=messaging.AndroidConfig(
                 priority="high",
@@ -58,6 +58,6 @@ def send_loud_push(fcm_token: str):
             ),
         )
         response = messaging.send(message)
-        logger.info("FCM loud push sent: %s", response)
+        logger.info("FCM %s push sent: %s", command_type, response)
     except Exception as e:
         logger.error("FCM send failed: %s", e)

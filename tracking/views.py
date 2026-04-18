@@ -29,7 +29,7 @@ from .models import (
     RemoteDeviceCommand,
     SafeZone,
 )
-from .fcm import send_loud_push
+from .fcm import send_command_push
 from .serializers import (
     AlertSerializer,
     AppLimitSerializer,
@@ -718,10 +718,13 @@ class ChildDeviceCommandCreateView(APIView):
             payload=payload,
         )
 
-        # Send FCM push for loud commands so the child phone plays the alarm
-        # even if the app is closed / killed.
-        if command.command_type == RemoteDeviceCommand.TYPE_LOUD and child.fcm_token:
-            send_loud_push(child.fcm_token)
+        # Send FCM push to wake the child device even if the app is killed.
+        if child.fcm_token and command.command_type in (
+            RemoteDeviceCommand.TYPE_LOUD,
+            RemoteDeviceCommand.TYPE_AROUND_START,
+            RemoteDeviceCommand.TYPE_AROUND_STOP,
+        ):
+            send_command_push(child.fcm_token, command.command_type)
 
         return Response(RemoteDeviceCommandSerializer(command).data, status=201)
 
