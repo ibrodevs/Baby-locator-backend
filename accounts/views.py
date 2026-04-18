@@ -138,6 +138,18 @@ class ChildAvatarUploadView(APIView):
         return Response(UserSerializer(child, context={"request": request}).data)
 
 
+class FcmTokenView(APIView):
+    """Register or update the FCM token for the authenticated user."""
+
+    def post(self, request):
+        fcm_token = request.data.get("fcm_token", "").strip()
+        if not fcm_token:
+            return Response({"detail": "fcm_token is required"}, status=400)
+        request.user.fcm_token = fcm_token
+        request.user.save(update_fields=["fcm_token"])
+        return Response({"status": "ok"})
+
+
 class AvatarUploadView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 

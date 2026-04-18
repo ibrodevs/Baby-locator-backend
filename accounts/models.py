@@ -20,6 +20,7 @@ class User(AbstractUser):
         on_delete=models.CASCADE,
         related_name="children",
     )
+    fcm_token = models.CharField(max_length=255, blank=True, default="")
 
     def __str__(self):
         return f"{self.username} ({self.role})"

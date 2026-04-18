@@ -113,3 +113,10 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Firebase Cloud Messaging
+# Path to the service account JSON file downloaded from Firebase Console.
+FIREBASE_SERVICE_ACCOUNT_KEY = os.getenv(
+    "FIREBASE_SERVICE_ACCOUNT_KEY",
+    str(BASE_DIR / "firebase-service-account.json"),
+)
