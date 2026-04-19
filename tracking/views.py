@@ -725,7 +725,11 @@ class ChildDeviceCommandCreateView(APIView):
             RemoteDeviceCommand.TYPE_AROUND_START,
             RemoteDeviceCommand.TYPE_AROUND_STOP,
         ):
-            send_command_push(child.fcm_token, command.command_type)
+            send_command_push(
+                child.fcm_token,
+                command.command_type,
+                extra_data=payload,
+            )
 
         return Response(RemoteDeviceCommandSerializer(command).data, status=201)
 
