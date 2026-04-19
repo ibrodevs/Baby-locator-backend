@@ -85,14 +85,13 @@ class UpdateProfileSerializer(serializers.Serializer):
 
 class RegisterChildWithCodeSerializer(serializers.Serializer):
     code = serializers.CharField()
-    username = serializers.CharField()
-    password = serializers.CharField(write_only=True, min_length=4)
-    display_name = serializers.CharField(required=False, allow_blank=True)
+    display_name = serializers.CharField()
 
-    def validate_username(self, v):
-        if User.objects.filter(username=v).exists():
-            raise serializers.ValidationError("already taken")
-        return v
+    def validate_display_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("This field may not be blank.")
+        return value
 
 
 class AuthResponseSerializer(serializers.Serializer):

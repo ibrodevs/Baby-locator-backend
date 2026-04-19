@@ -1,4 +1,6 @@
 from datetime import timedelta
+import secrets
+import uuid
 
 from django.http import HttpResponse
 from django.utils import timezone
@@ -19,6 +21,13 @@ from .serializers import (
     UserSerializer,
     token_for,
 )
+
+
+def _generate_child_credentials():
+    while True:
+        username = f"child_{uuid.uuid4().hex[:12]}"
+        if not User.objects.filter(username=username).exists():
+            return username, secrets.token_urlsafe(18)
 
 
 class RegisterParentView(APIView):
@@ -225,24 +234,35 @@ class RegisterChildWithCodeView(APIView):
         s = RegisterChildWithCodeSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         code_str = s.validated_data["code"].strip().upper()
+        display_name = s.validated_data["display_name"]
         try:
             invite = InviteCode.objects.get(code=code_str)
         except InviteCode.DoesNotExist:
             return Response({"detail": "Invalid invite code"}, status=400)
-        if not invite.is_valid:
-            return Response({"detail": "Invite code expired or already used"}, status=400)
-        child = User.objects.create_user(
-            username=s.validated_data["username"],
-            password=s.validated_data["password"],
-            display_name=s.validated_data.get("display_name", ""),
-            role=User.ROLE_CHILD,
-            parent=invite.parent,
+        if invite.expires_at <= timezone.now():
+            return Response({"detail": "Invite code expired"}, status=400)
+
+        child = (
+            invite.parent.children.filter(display_name__iexact=display_name)
+            .order_by("id")
+            .first()
         )
-        invite.used_by = child
-        invite.save(update_fields=["used_by"])
+        status_code = status.HTTP_200_OK
+
+        if child is None:
+            username, password = _generate_child_credentials()
+            child = User.objects.create_user(
+                username=username,
+                password=password,
+                display_name=display_name,
+                role=User.ROLE_CHILD,
+                parent=invite.parent,
+            )
+            status_code = status.HTTP_201_CREATED
+
         return Response(
             {"token": token_for(child), "user": UserSerializer(child, context={"request": request}).data},
-            status=status.HTTP_201_CREATED,
+            status=status_code,
         )
 
 
@@ -295,7 +315,7 @@ def invite_landing(request, code):
   <ol class="steps">
     <li>Скачайте приложение <b>Kid Security</b></li>
     <li>Откройте и выберите <b>«Я ребёнок»</b></li>
-    <li>Нажмите <b>«Нет аккаунта?»</b> и введите код выше</li>
+    <li>Введите код выше и затем укажите отображаемое имя</li>
   </ol>
 </div>
 </body>
