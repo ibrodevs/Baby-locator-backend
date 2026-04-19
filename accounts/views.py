@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -243,3 +244,86 @@ class RegisterChildWithCodeView(APIView):
             {"token": token_for(child), "user": UserSerializer(child, context={"request": request}).data},
             status=status.HTTP_201_CREATED,
         )
+
+
+def invite_landing(request, code):
+    """Landing page for invite links — shows code and instructions."""
+    try:
+        invite = InviteCode.objects.get(code=code.upper())
+        valid = invite.is_valid
+        parent_name = invite.parent.display_name or invite.parent.username
+    except InviteCode.DoesNotExist:
+        valid = False
+        parent_name = ""
+
+    if valid:
+        html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kid Security — Приглашение</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: #f0f4ff; display: flex; justify-content: center; align-items: center;
+         min-height: 100vh; padding: 20px; }}
+  .card {{ background: #fff; border-radius: 24px; padding: 40px 32px; max-width: 400px;
+           width: 100%; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.08); }}
+  .icon {{ width: 80px; height: 80px; background: linear-gradient(135deg, #3366FF, #1a1a4e);
+           border-radius: 50%; margin: 0 auto 24px; display: flex; align-items: center;
+           justify-content: center; font-size: 36px; }}
+  h1 {{ color: #1a1a4e; font-size: 24px; margin-bottom: 8px; }}
+  .sub {{ color: #6b7280; font-size: 14px; margin-bottom: 24px; }}
+  .code-box {{ background: #f0f4ff; border-radius: 16px; padding: 20px; margin-bottom: 24px; }}
+  .code {{ font-size: 32px; font-weight: 900; color: #1a1a4e; letter-spacing: 3px; }}
+  .label {{ font-size: 12px; color: #6b7280; margin-top: 6px; }}
+  .steps {{ text-align: left; margin-bottom: 24px; }}
+  .steps li {{ color: #374151; font-size: 14px; margin-bottom: 8px; line-height: 1.5; }}
+  .parent {{ color: #3366FF; font-weight: 700; }}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">&#x1F46A;</div>
+  <h1>Вас приглашают!</h1>
+  <p class="sub"><span class="parent">{parent_name}</span> приглашает вас в семейный круг Kid Security</p>
+  <div class="code-box">
+    <div class="code">{invite.code}</div>
+    <div class="label">Код приглашения</div>
+  </div>
+  <ol class="steps">
+    <li>Скачайте приложение <b>Kid Security</b></li>
+    <li>Откройте и выберите <b>«Я ребёнок»</b></li>
+    <li>Нажмите <b>«Нет аккаунта?»</b> и введите код выше</li>
+  </ol>
+</div>
+</body>
+</html>"""
+    else:
+        html = """<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kid Security — Приглашение</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: #f0f4ff; display: flex; justify-content: center; align-items: center;
+         min-height: 100vh; padding: 20px; }
+  .card { background: #fff; border-radius: 24px; padding: 40px 32px; max-width: 400px;
+          width: 100%; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.08); }
+  h1 { color: #dc2626; font-size: 22px; margin-bottom: 12px; }
+  p { color: #6b7280; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Код недействителен</h1>
+  <p>Этот код приглашения истёк или уже был использован. Попросите родителя отправить новый код.</p>
+</div>
+</body>
+</html>"""
+
+    return HttpResponse(html)
