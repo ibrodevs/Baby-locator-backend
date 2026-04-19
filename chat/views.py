@@ -315,3 +315,50 @@ class RewardClaimView(APIView):
         reward = get_object_or_404(Reward, id=reward_id, child=child)
         reward.delete()
         return Response(status=204)
+
+
+class ChildNotificationsView(APIView):
+    """
+    GET /api/chat/notifications/ — child gets unread messages + pending tasks.
+    Used as a polling fallback when FCM is unavailable.
+    """
+
+    def get(self, request):
+        user = request.user
+        if user.role != User.ROLE_CHILD:
+            return Response({"detail": "children only"}, status=403)
+
+        unread_messages = Message.objects.filter(
+            receiver=user,
+            read=False,
+        ).order_by("-created_at")[:20]
+
+        pending_tasks = Task.objects.filter(
+            child=user,
+            status=Task.STATUS_PENDING,
+        ).order_by("-created_at")[:20]
+
+        notifications = []
+
+        for msg in unread_messages:
+            sender_name = msg.sender.display_name or msg.sender.username
+            notifications.append({
+                "id": f"msg_{msg.id}",
+                "type": "chat_message",
+                "title": f"Сообщение от {sender_name}",
+                "body": msg.text[:200],
+                "created_at": msg.created_at.isoformat(),
+            })
+
+        for task in pending_tasks:
+            parent_name = task.parent.display_name or task.parent.username
+            notifications.append({
+                "id": f"task_{task.id}",
+                "type": "task_assigned",
+                "title": f"Задание от {parent_name}",
+                "body": task.title,
+                "created_at": task.created_at.isoformat(),
+            })
+
+        notifications.sort(key=lambda n: n["created_at"], reverse=True)
+        return Response(notifications)

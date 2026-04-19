@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     ChatMessagesView,
+    ChildNotificationsView,
     RewardClaimView,
     RewardListView,
     StarsView,
@@ -10,6 +11,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("notifications/", ChildNotificationsView.as_view()),
     path("<int:child_id>/messages/", ChatMessagesView.as_view()),
     path("<int:child_id>/tasks/", TaskListView.as_view()),
     path("<int:child_id>/tasks/<int:task_id>/<str:action>/", TaskActionView.as_view()),
