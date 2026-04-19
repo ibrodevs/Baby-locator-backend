@@ -29,7 +29,7 @@ from .models import (
     RemoteDeviceCommand,
     SafeZone,
 )
-from .fcm import send_command_push
+from .fcm import send_command_push, send_notification_push
 from .serializers import (
     AlertSerializer,
     AppLimitSerializer,
@@ -721,6 +721,7 @@ class ChildDeviceCommandCreateView(APIView):
         # Send FCM push to wake the child device even if the app is killed.
         if child.fcm_token and command.command_type in (
             RemoteDeviceCommand.TYPE_LOUD,
+            RemoteDeviceCommand.TYPE_LOUD_STOP,
             RemoteDeviceCommand.TYPE_AROUND_START,
             RemoteDeviceCommand.TYPE_AROUND_STOP,
         ):
@@ -851,6 +852,65 @@ class AroundAudioStreamView(APIView):
             clip.audio.open("rb"),
             content_type=content_type or "audio/mp4",
         )
+
+
+class SosView(APIView):
+    """Child sends an SOS alert to their parent."""
+    permission_classes = [IsAuthenticated]
+
+    SOS_COOLDOWN = timedelta(seconds=30)
+
+    def post(self, request):
+        if request.user.role != User.ROLE_CHILD:
+            return Response({"detail": "children only"}, status=403)
+
+        parent = request.user.parent
+        if not parent:
+            return Response({"detail": "no parent linked"}, status=400)
+
+        # Cooldown to prevent spam
+        cutoff = timezone.now() - self.SOS_COOLDOWN
+        already = Alert.objects.filter(
+            child=request.user,
+            parent=parent,
+            alert_type=Alert.TYPE_SOS,
+            created_at__gte=cutoff,
+        ).exists()
+        if already:
+            return Response({"detail": "SOS already sent recently"}, status=429)
+
+        child_name = request.user.display_name or request.user.username
+        address = request.data.get("address", "")
+        lat = request.data.get("lat")
+        lng = request.data.get("lng")
+
+        location_text = f" Местоположение: {address}" if address else ""
+        if lat and lng and not address:
+            location_text = f" Координаты: {lat}, {lng}"
+
+        alert = Alert.objects.create(
+            child=request.user,
+            parent=parent,
+            alert_type=Alert.TYPE_SOS,
+            title=f"SOS от {child_name}!",
+            message=f"{child_name} нужна помощь!{location_text}",
+        )
+
+        # Send FCM push to parent
+        if parent.fcm_token:
+            send_notification_push(
+                parent.fcm_token,
+                notification_type="sos",
+                title=f"🚨 SOS от {child_name}!",
+                body=f"{child_name} нужна помощь!{location_text}",
+                extra_data={
+                    "child_id": request.user.id,
+                    "child_name": child_name,
+                    "alert_id": alert.id,
+                },
+            )
+
+        return Response({"detail": "sos sent", "alert_id": alert.id}, status=201)
 
 
 class ParentAlertsView(APIView):

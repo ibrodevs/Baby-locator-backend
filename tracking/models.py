@@ -185,10 +185,12 @@ class AppUsageSnapshot(models.Model):
 
 class RemoteDeviceCommand(models.Model):
     TYPE_LOUD = "loud"
+    TYPE_LOUD_STOP = "loud_stop"
     TYPE_AROUND_START = "around_start"
     TYPE_AROUND_STOP = "around_stop"
     TYPE_CHOICES = [
         (TYPE_LOUD, "Loud"),
+        (TYPE_LOUD_STOP, "Loud Stop"),
         (TYPE_AROUND_START, "Around Start"),
         (TYPE_AROUND_STOP, "Around Stop"),
     ]
@@ -238,9 +240,15 @@ class Alert(models.Model):
 
     TYPE_BATTERY_LOW = "battery_low"
     TYPE_SAFE_ZONE_EXIT = "safe_zone_exit"
+    TYPE_SOS = "sos"
+    TYPE_CHAT_MESSAGE = "chat_message"
+    TYPE_TASK_ASSIGNED = "task_assigned"
     TYPE_CHOICES = [
         (TYPE_BATTERY_LOW, "Battery Low"),
         (TYPE_SAFE_ZONE_EXIT, "Safe Zone Exit"),
+        (TYPE_SOS, "SOS"),
+        (TYPE_CHAT_MESSAGE, "Chat Message"),
+        (TYPE_TASK_ASSIGNED, "Task Assigned"),
     ]
 
     child = models.ForeignKey(

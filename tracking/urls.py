@@ -21,6 +21,7 @@ from .views import (
     PendingDeviceCommandsView,
     SafeZoneViewSet,
     ShareLocationView,
+    SosView,
 )
 
 router = DefaultRouter()
@@ -43,6 +44,7 @@ urlpatterns = [
     path("children/<int:child_id>/safety-score/", ChildSafetyScoreView.as_view()),
     path("children/<int:child_id>/stats/", ChildStatsSummaryView.as_view()),
     path("children/<int:child_id>/app-limits/", ChildAppLimitView.as_view()),
+    path("sos/", SosView.as_view()),
     path("alerts/", ParentAlertsView.as_view()),
     path("alerts/<int:alert_id>/read/", AlertReadView.as_view()),
     path("alerts/read-all/", AlertReadAllView.as_view()),
