@@ -83,6 +83,18 @@ class UpdateProfileSerializer(serializers.Serializer):
         return value
 
 
+class RegisterChildWithCodeSerializer(serializers.Serializer):
+    code = serializers.CharField()
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True, min_length=4)
+    display_name = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_username(self, v):
+        if User.objects.filter(username=v).exists():
+            raise serializers.ValidationError("already taken")
+        return v
+
+
 class AuthResponseSerializer(serializers.Serializer):
     token = serializers.CharField()
     user = UserSerializer()

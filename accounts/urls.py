@@ -6,8 +6,10 @@ from .views import (
     ChildDetailView,
     ChildrenView,
     FcmTokenView,
+    InviteCodeView,
     LoginView,
     MeView,
+    RegisterChildWithCodeView,
     RegisterParentView,
 )
 
@@ -20,4 +22,6 @@ urlpatterns = [
     path("children/<int:child_id>/", ChildDetailView.as_view()),
     path("children/<int:child_id>/avatar/", ChildAvatarUploadView.as_view()),
     path("avatar/", AvatarUploadView.as_view()),
+    path("invite/", InviteCodeView.as_view()),
+    path("register-child/", RegisterChildWithCodeView.as_view()),
 ]
