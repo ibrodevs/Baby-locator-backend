@@ -858,7 +858,7 @@ class LatestAroundAudioView(APIView):
                 qs = qs.filter(id__gt=int(after_id))
             except (TypeError, ValueError):
                 return Response({"detail": "invalid after_id"}, status=400)
-        clip = qs.order_by("-id").first()
+        clip = qs.order_by("id").first()
         if clip is None:
             return Response(status=204)
         return Response(
