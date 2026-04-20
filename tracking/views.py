@@ -148,6 +148,7 @@ class ShareLocationView(APIView):
             lng=s.validated_data["lng"],
             address=address,
             battery=s.validated_data.get("battery"),
+            charging=s.validated_data.get("charging", False),
             active=s.validated_data.get("active", True),
         )
 
@@ -232,7 +233,11 @@ class ChildLatestLocationView(APIView):
         loc = child.locations.first()
         if not loc:
             return Response({"detail": "no location yet"}, status=404)
-        return Response(LocationSerializer(loc).data)
+        data = LocationSerializer(loc).data
+        if "charging" not in data:
+            device_status = getattr(child, "device_status", None)
+            data["charging"] = device_status.charging if device_status else False
+        return Response(data)
 
 
 class ChildLocationHistoryView(APIView):
@@ -259,7 +264,11 @@ class AllChildrenLocationsView(APIView):
             entry = {
                 "child": UserSerializer(child, context={"request": request}).data,
                 "location": LocationSerializer(loc).data if loc else None,
-                "charging": device_status.charging if device_status else False,
+                "charging": (
+                    loc.charging
+                    if loc is not None
+                    else (device_status.charging if device_status else False)
+                ),
             }
             result.append(entry)
         return Response(result)

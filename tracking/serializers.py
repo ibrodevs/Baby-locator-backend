@@ -16,7 +16,17 @@ from .models import (
 class LocationSerializer(serializers.ModelSerializer):
     class Meta:
         model = LocationUpdate
-        fields = ["id", "child", "lat", "lng", "address", "battery", "active", "created_at"]
+        fields = [
+            "id",
+            "child",
+            "lat",
+            "lng",
+            "address",
+            "battery",
+            "charging",
+            "active",
+            "created_at",
+        ]
         read_only_fields = ["id", "child", "created_at"]
 
 
@@ -25,6 +35,7 @@ class LocationInputSerializer(serializers.Serializer):
     lng = serializers.FloatField()
     address = serializers.CharField(required=False, allow_blank=True, default="")
     battery = serializers.IntegerField(required=False, allow_null=True)
+    charging = serializers.BooleanField(required=False, default=False)
     active = serializers.BooleanField(required=False, default=True)
 
 

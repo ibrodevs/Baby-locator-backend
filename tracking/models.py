@@ -15,6 +15,7 @@ class LocationUpdate(models.Model):
     lng = models.FloatField()
     address = models.CharField(max_length=255, blank=True)
     battery = models.IntegerField(null=True, blank=True)
+    charging = models.BooleanField(default=False)
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
