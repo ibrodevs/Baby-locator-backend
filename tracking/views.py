@@ -511,6 +511,41 @@ class ChildDeviceStatsSyncView(APIView):
             if snapshots:
                 AppUsageSnapshot.objects.bulk_create(snapshots)
 
+        # Auto-block apps that exceed their enabled daily limits
+        today_str = timezone.localdate()
+        today_apps = [s for s in snapshots if s.usage_date == today_str]
+        newly_blocked = False
+        for snapshot in today_apps:
+            limit = active_limits.get(snapshot.package_name)
+            if limit and snapshot.usage_minutes > limit.daily_limit_minutes:
+                _, created = BlockedApp.objects.get_or_create(
+                    child=request.user,
+                    package_name=snapshot.package_name,
+                    defaults={"app_name": snapshot.app_name},
+                )
+                if created:
+                    newly_blocked = True
+
+        if newly_blocked:
+            # Send updated blocked list to the child device
+            blocked_packages = list(
+                request.user.blocked_apps.values_list("package_name", flat=True)
+            )
+            parent = request.user.parent
+            if parent:
+                cmd = RemoteDeviceCommand.objects.create(
+                    child=request.user,
+                    created_by=parent,
+                    command_type=RemoteDeviceCommand.TYPE_SYNC_BLOCKED_APPS,
+                    payload={"blocked_packages": blocked_packages},
+                )
+                if request.user.fcm_token:
+                    send_command_push(
+                        request.user.fcm_token,
+                        RemoteDeviceCommand.TYPE_SYNC_BLOCKED_APPS,
+                        {"command_id": cmd.id},
+                    )
+
         return Response(
             {
                 "detail": "device synced",
@@ -620,6 +655,12 @@ class ChildStatsSummaryView(APIView):
             else None
         )
 
+        # Recalculate over_limit_apps dynamically from current limits
+        over_limit_count = sum(
+            1 for app in selected_apps.values()
+            if app.get("exceeded", False)
+        )
+
         weekly = []
         for offset in range(7):
             day = week_start + timedelta(days=offset)
@@ -656,6 +697,25 @@ class ChildStatsSummaryView(APIView):
             key=lambda item: (-item["usage_minutes"], item["app_name"].lower()),
         )
 
+        # Build all_known_apps: unique apps ever seen on this child's device
+        all_snapshots = (
+            child.app_usage_snapshots
+            .values("package_name", "app_name")
+            .distinct()
+        )
+        known_packages_in_apps = {a["package_name"] for a in apps}
+        all_known_apps = sorted(
+            [
+                {
+                    "package_name": s["package_name"],
+                    "app_name": s["app_name"],
+                }
+                for s in all_snapshots
+                if s["package_name"] not in known_packages_in_apps
+            ],
+            key=lambda x: x["app_name"].lower(),
+        )
+
         return Response(
             {
                 "child": UserSerializer(child, context={"request": request}).data,
@@ -684,11 +744,12 @@ class ChildStatsSummaryView(APIView):
                     "selected_total_minutes": today_used_minutes,
                     "selected_total_limit_minutes": total_limit_minutes,
                     "goal_progress": goal_progress,
-                    "over_limit_apps": selected_summary.over_limit_apps if selected_summary else 0,
+                    "over_limit_apps": over_limit_count,
                 },
                 "weekly": weekly,
                 "calendar": calendar_days,
                 "apps": apps,
+                "all_known_apps": all_known_apps,
             }
         )
 

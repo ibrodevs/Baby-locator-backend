@@ -80,9 +80,13 @@ def send_notification_push(fcm_token: str, notification_type: str, title: str, b
     try:
         from firebase_admin import messaging
 
-        data = {"notification_type": notification_type}
+        data = {
+            "notification_type": notification_type,
+            "title": title,
+            "body": body,
+        }
         if extra_data:
-            data.update({k: str(v) for k, v in extra_data.items()})
+            data.update({k: str(v) for k, v in extra_data.items() if v is not None})
 
         message = messaging.Message(
             data=data,
