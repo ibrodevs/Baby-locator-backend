@@ -23,7 +23,7 @@ class Message(models.Model):
     )
     text = models.TextField(blank=True)
     file = models.FileField(upload_to="chat_files/", null=True, blank=True)
-    file_name = models.CharField(max_length=255, blank=True)
+    file_name = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(
         max_length=8, choices=STATUS_CHOICES, default=STATUS_SENT,
     )
@@ -32,6 +32,14 @@ class Message(models.Model):
 
     class Meta:
         ordering = ["created_at"]
+
+    def save(self, *args, **kwargs):
+        # Keep DB writes safe even if callers omit file_name or pass None.
+        if self.file and not self.file_name:
+            self.file_name = getattr(self.file, "name", "") or ""
+        else:
+            self.file_name = self.file_name or ""
+        super().save(*args, **kwargs)
 
     @property
     def is_read(self):
