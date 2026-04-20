@@ -24,6 +24,7 @@ from .models import (
     AppLimit,
     AppUsageSnapshot,
     AroundAudioClip,
+    BlockedApp,
     DeviceDailySummary,
     DeviceStatus,
     LocationUpdate,
@@ -36,6 +37,8 @@ from .serializers import (
     AppLimitSerializer,
     AppLimitWriteSerializer,
     AroundAudioClipSerializer,
+    BlockAppSerializer,
+    BlockedAppSerializer,
     DeviceStatsSyncSerializer,
     LocationInputSerializer,
     LocationSerializer,
@@ -971,3 +974,80 @@ class AlertReadAllView(APIView):
             return Response({"detail": "parents only"}, status=403)
         request.user.parent_alerts.filter(read=False).update(read=True)
         return Response({"detail": "ok"})
+
+
+class BlockedAppsView(APIView):
+    """
+    GET  /api/children/<child_id>/blocked-apps/ — list blocked apps
+    POST /api/children/<child_id>/blocked-apps/ — block an app
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, child_id):
+        child = _resolve_child_for_request(request, child_id)
+        if child is None:
+            return Response({"detail": "forbidden"}, status=403)
+        apps = BlockedApp.objects.filter(child=child)
+        return Response(BlockedAppSerializer(apps, many=True).data)
+
+    def post(self, request, child_id):
+        if request.user.role != User.ROLE_PARENT:
+            return Response({"detail": "parents only"}, status=403)
+        child = _resolve_child_for_request(request, child_id)
+        if child is None:
+            return Response({"detail": "forbidden"}, status=403)
+
+        s = BlockAppSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+
+        blocked, created = BlockedApp.objects.get_or_create(
+            child=child,
+            package_name=s.validated_data["package_name"],
+            defaults={"app_name": s.validated_data["app_name"]},
+        )
+
+        # Send command to child to refresh blocked apps list.
+        self._send_sync_command(child, request.user)
+
+        return Response(
+            BlockedAppSerializer(blocked).data,
+            status=201 if created else 200,
+        )
+
+    @staticmethod
+    def _send_sync_command(child, parent):
+        blocked_packages = list(
+            child.blocked_apps.values_list("package_name", flat=True)
+        )
+        cmd = RemoteDeviceCommand.objects.create(
+            child=child,
+            created_by=parent,
+            command_type=RemoteDeviceCommand.TYPE_SYNC_BLOCKED_APPS,
+            payload={"blocked_packages": blocked_packages},
+        )
+        if child.fcm_token:
+            send_command_push(
+                child.fcm_token,
+                RemoteDeviceCommand.TYPE_SYNC_BLOCKED_APPS,
+                {"command_id": cmd.id},
+            )
+
+
+class UnblockAppView(APIView):
+    """DELETE /api/children/<child_id>/blocked-apps/<blocked_id>/"""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, child_id, blocked_id):
+        if request.user.role != User.ROLE_PARENT:
+            return Response({"detail": "parents only"}, status=403)
+        child = _resolve_child_for_request(request, child_id)
+        if child is None:
+            return Response({"detail": "forbidden"}, status=403)
+
+        blocked = get_object_or_404(BlockedApp, id=blocked_id, child=child)
+        blocked.delete()
+
+        # Send updated list to child.
+        BlockedAppsView._send_sync_command(child, request.user)
+
+        return Response(status=204)

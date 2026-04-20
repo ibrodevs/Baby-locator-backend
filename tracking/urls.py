@@ -7,6 +7,7 @@ from .views import (
     AllChildrenLocationsView,
     AroundAudioStreamView,
     AroundAudioUploadView,
+    BlockedAppsView,
     ChildActivityView,
     ChildAppLimitView,
     ChildDeviceCommandCreateView,
@@ -22,6 +23,7 @@ from .views import (
     SafeZoneViewSet,
     ShareLocationView,
     SosView,
+    UnblockAppView,
 )
 
 router = DefaultRouter()
@@ -44,6 +46,8 @@ urlpatterns = [
     path("children/<int:child_id>/safety-score/", ChildSafetyScoreView.as_view()),
     path("children/<int:child_id>/stats/", ChildStatsSummaryView.as_view()),
     path("children/<int:child_id>/app-limits/", ChildAppLimitView.as_view()),
+    path("children/<int:child_id>/blocked-apps/", BlockedAppsView.as_view()),
+    path("children/<int:child_id>/blocked-apps/<int:blocked_id>/", UnblockAppView.as_view()),
     path("sos/", SosView.as_view()),
     path("alerts/", ParentAlertsView.as_view()),
     path("alerts/<int:alert_id>/read/", AlertReadView.as_view()),

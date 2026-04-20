@@ -5,6 +5,7 @@ from .models import (
     AppLimit,
     AppUsageSnapshot,
     AroundAudioClip,
+    BlockedApp,
     DeviceDailySummary,
     DeviceStatus,
     LocationUpdate,
@@ -259,3 +260,15 @@ class AroundAudioClipSerializer(serializers.ModelSerializer):
             return ""
         url = obj.audio.url
         return request.build_absolute_uri(url) if request else url
+
+
+class BlockedAppSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BlockedApp
+        fields = ["id", "package_name", "app_name", "created_at"]
+        read_only_fields = fields
+
+
+class BlockAppSerializer(serializers.Serializer):
+    package_name = serializers.CharField(max_length=255)
+    app_name = serializers.CharField(max_length=120)

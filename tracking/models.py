@@ -162,6 +162,24 @@ class AppLimit(models.Model):
         return f"{self.child.username}: {self.app_name}"
 
 
+class BlockedApp(models.Model):
+    child = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="blocked_apps",
+    )
+    package_name = models.CharField(max_length=255)
+    app_name = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("child", "package_name")]
+        ordering = ["app_name"]
+
+    def __str__(self):
+        return f"{self.child.username}: blocked {self.app_name}"
+
+
 class AppUsageSnapshot(models.Model):
     child = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -189,11 +207,13 @@ class RemoteDeviceCommand(models.Model):
     TYPE_LOUD_STOP = "loud_stop"
     TYPE_AROUND_START = "around_start"
     TYPE_AROUND_STOP = "around_stop"
+    TYPE_SYNC_BLOCKED_APPS = "sync_blocked_apps"
     TYPE_CHOICES = [
         (TYPE_LOUD, "Loud"),
         (TYPE_LOUD_STOP, "Loud Stop"),
         (TYPE_AROUND_START, "Around Start"),
         (TYPE_AROUND_STOP, "Around Stop"),
+        (TYPE_SYNC_BLOCKED_APPS, "Sync Blocked Apps"),
     ]
 
     STATUS_PENDING = "pending"
