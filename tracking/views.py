@@ -1,6 +1,7 @@
 import calendar
 import math
 import mimetypes
+import re
 from datetime import date as dt_date
 from datetime import timedelta
 
@@ -79,6 +80,16 @@ def _parse_selected_date(raw_value, fallback):
     return parsed or fallback
 
 
+def _sanitize_address(value):
+    address = (value or "").strip()
+    if not address:
+        return ""
+    coordinate_pattern = r"^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$"
+    if re.fullmatch(coordinate_pattern, address):
+        return ""
+    return address
+
+
 def _parse_selected_month(raw_value, fallback):
     if not raw_value:
         return fallback
@@ -130,11 +141,12 @@ class ShareLocationView(APIView):
             return Response({"detail": "children only"}, status=403)
         s = LocationInputSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+        address = _sanitize_address(s.validated_data.get("address", ""))
         loc = LocationUpdate.objects.create(
             child=request.user,
             lat=s.validated_data["lat"],
             lng=s.validated_data["lng"],
-            address=s.validated_data.get("address", ""),
+            address=address,
             battery=s.validated_data.get("battery"),
             active=s.validated_data.get("active", True),
         )
@@ -243,9 +255,11 @@ class AllChildrenLocationsView(APIView):
         result = []
         for child in children:
             loc = child.locations.first()
+            device_status = getattr(child, "device_status", None)
             entry = {
                 "child": UserSerializer(child, context={"request": request}).data,
                 "location": LocationSerializer(loc).data if loc else None,
+                "charging": device_status.charging if device_status else False,
             }
             result.append(entry)
         return Response(result)
