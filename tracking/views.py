@@ -431,6 +431,7 @@ class ChildSafetyScoreView(APIView):
 class ChildDeviceStatsSyncView(APIView):
     """Child device uploads live device information and app usage history."""
     permission_classes = [IsAuthenticated]
+    MAX_DAILY_USAGE_MINUTES = 24 * 60
 
     def post(self, request):
         if request.user.role != User.ROLE_CHILD:
@@ -469,10 +470,23 @@ class ChildDeviceStatsSyncView(APIView):
         summaries = []
         snapshots = []
         for day in days:
-            apps = day.get("apps", [])
-            total_minutes = day.get(
-                "total_minutes",
-                sum(app["usage_minutes"] for app in apps),
+            raw_apps = day.get("apps", [])
+            apps = []
+            for app in raw_apps:
+                apps.append({
+                    **app,
+                    "usage_minutes": min(
+                        max(int(app["usage_minutes"]), 0),
+                        self.MAX_DAILY_USAGE_MINUTES,
+                    ),
+                })
+
+            requested_total = day.get("total_minutes")
+            if requested_total is None:
+                requested_total = sum(app["usage_minutes"] for app in apps)
+            total_minutes = min(
+                max(int(requested_total), 0),
+                self.MAX_DAILY_USAGE_MINUTES,
             )
             over_limit_apps = 0
             for app in apps:
