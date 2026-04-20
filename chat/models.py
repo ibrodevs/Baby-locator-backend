@@ -21,7 +21,9 @@ class Message(models.Model):
         on_delete=models.CASCADE,
         related_name="received_messages",
     )
-    text = models.TextField()
+    text = models.TextField(blank=True)
+    file = models.FileField(upload_to="chat_files/", null=True, blank=True)
+    file_name = models.CharField(max_length=255, blank=True)
     status = models.CharField(
         max_length=8, choices=STATUS_CHOICES, default=STATUS_SENT,
     )

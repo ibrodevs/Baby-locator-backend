@@ -1,6 +1,7 @@
 from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -24,6 +25,7 @@ class ChatMessagesView(APIView):
     GET  /api/chat/<child_id>/messages/ — list messages between current user and child
     POST /api/chat/<child_id>/messages/ — send a message to child (or parent sends to child)
     """
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def _get_child_and_validate(self, request, child_id):
         child = get_object_or_404(User, id=child_id, role=User.ROLE_CHILD)
@@ -63,8 +65,13 @@ class ChatMessagesView(APIView):
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
 
-        s = SendMessageSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
+        text = (request.data.get("text") or "").strip()
+        uploaded_file = request.FILES.get("file")
+
+        if not text and not uploaded_file:
+            return Response(
+                {"detail": "text or file is required"}, status=400
+            )
 
         user = request.user
         if user.role == User.ROLE_PARENT:
@@ -75,17 +82,20 @@ class ChatMessagesView(APIView):
         msg = Message.objects.create(
             sender=user,
             receiver=receiver,
-            text=s.validated_data["text"],
+            text=text,
+            file=uploaded_file,
+            file_name=uploaded_file.name if uploaded_file else "",
         )
 
         # Send FCM push to the receiver
         sender_name = user.display_name or user.username
+        push_body = text[:200] if text else f"📎 {uploaded_file.name}" if uploaded_file else ""
         if receiver.fcm_token:
             send_notification_push(
                 receiver.fcm_token,
                 notification_type="chat_message",
                 title=f"Сообщение от {sender_name}",
-                body=s.validated_data["text"][:200],
+                body=push_body,
                 extra_data={
                     "child_id": child.id,
                     "sender_id": user.id,
@@ -99,7 +109,7 @@ class ChatMessagesView(APIView):
                 parent=child.parent,
                 alert_type=Alert.TYPE_CHAT_MESSAGE,
                 title=f"Сообщение от {sender_name}",
-                message=s.validated_data["text"][:200],
+                message=push_body,
             )
 
         return Response(
