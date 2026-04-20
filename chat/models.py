@@ -4,6 +4,13 @@ from django.db import models
 
 class Message(models.Model):
     """Chat message between a parent and one of their children."""
+    STATUS_SENT = "sent"
+    STATUS_READ = "read"
+    STATUS_CHOICES = [
+        (STATUS_SENT, "Sent"),       # ✓  — отправлено
+        (STATUS_READ, "Read"),       # ✓✓ — прочитано
+    ]
+
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -15,11 +22,18 @@ class Message(models.Model):
         related_name="received_messages",
     )
     text = models.TextField()
-    read = models.BooleanField(default=False)
+    status = models.CharField(
+        max_length=8, choices=STATUS_CHOICES, default=STATUS_SENT,
+    )
+    read_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["created_at"]
+
+    @property
+    def is_read(self):
+        return self.status == self.STATUS_READ
 
     def __str__(self):
         return f"{self.sender.username} -> {self.receiver.username}: {self.text[:40]}"

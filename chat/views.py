@@ -46,7 +46,9 @@ class ChatMessagesView(APIView):
         ).order_by("created_at")
 
         # Mark unread messages as read for the current user
-        messages.filter(receiver=request.user, read=False).update(read=True)
+        messages.filter(
+            receiver=request.user, status=Message.STATUS_SENT,
+        ).update(status=Message.STATUS_READ, read_at=timezone.now())
 
         return Response(MessageSerializer(messages, many=True).data)
 
@@ -95,6 +97,43 @@ class ChatMessagesView(APIView):
             )
 
         return Response(MessageSerializer(msg).data, status=201)
+
+
+class MarkMessagesReadView(APIView):
+    """
+    POST /api/chat/<child_id>/messages/read/ — mark messages as read.
+    Body: {"message_ids": [1, 2, 3]}  — optional, if omitted marks ALL unread.
+    """
+
+    def post(self, request, child_id):
+        child = get_object_or_404(User, id=child_id, role=User.ROLE_CHILD)
+        user = request.user
+
+        if user.role == User.ROLE_PARENT:
+            if child.parent_id != user.id:
+                return Response({"detail": "forbidden"}, status=403)
+            partner = child
+        elif user.role == User.ROLE_CHILD:
+            if user.id != child.id:
+                return Response({"detail": "forbidden"}, status=403)
+            partner = child.parent
+        else:
+            return Response({"detail": "forbidden"}, status=403)
+
+        qs = Message.objects.filter(
+            sender=partner,
+            receiver=user,
+            status=Message.STATUS_SENT,
+        )
+
+        message_ids = request.data.get("message_ids")
+        if message_ids:
+            qs = qs.filter(id__in=message_ids)
+
+        now = timezone.now()
+        updated = qs.update(status=Message.STATUS_READ, read_at=now)
+
+        return Response({"updated": updated})
 
 
 def _validate_parent_child(request, child_id):
@@ -330,7 +369,7 @@ class ChildNotificationsView(APIView):
 
         unread_messages = Message.objects.filter(
             receiver=user,
-            read=False,
+            status=Message.STATUS_SENT,
         ).order_by("-created_at")[:20]
 
         pending_tasks = Task.objects.filter(

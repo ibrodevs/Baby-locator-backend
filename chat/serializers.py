@@ -5,11 +5,19 @@ from .models import Message, Reward, Task
 
 class MessageSerializer(serializers.ModelSerializer):
     sender_name = serializers.CharField(source="sender.display_name", read_only=True)
+    is_read = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Message
-        fields = ["id", "sender", "receiver", "text", "read", "created_at", "sender_name"]
-        read_only_fields = ["id", "sender", "created_at", "read", "sender_name"]
+        fields = [
+            "id", "sender", "receiver", "text",
+            "status", "is_read", "read_at",
+            "created_at", "sender_name",
+        ]
+        read_only_fields = [
+            "id", "sender", "created_at",
+            "status", "is_read", "read_at", "sender_name",
+        ]
 
 
 class SendMessageSerializer(serializers.Serializer):
