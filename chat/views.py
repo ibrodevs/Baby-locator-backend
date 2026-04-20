@@ -50,7 +50,13 @@ class ChatMessagesView(APIView):
             receiver=request.user, status=Message.STATUS_SENT,
         ).update(status=Message.STATUS_READ, read_at=timezone.now())
 
-        return Response(MessageSerializer(messages, many=True).data)
+        return Response(
+            MessageSerializer(
+                messages,
+                many=True,
+                context={"request": request},
+            ).data
+        )
 
     def post(self, request, child_id):
         child, parent = self._get_child_and_validate(request, child_id)
@@ -96,7 +102,10 @@ class ChatMessagesView(APIView):
                 message=s.validated_data["text"][:200],
             )
 
-        return Response(MessageSerializer(msg).data, status=201)
+        return Response(
+            MessageSerializer(msg, context={"request": request}).data,
+            status=201,
+        )
 
 
 class MarkMessagesReadView(APIView):
