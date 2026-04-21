@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    ActivateMonitoringView,
     AlertReadAllView,
     AlertReadView,
     AllChildrenLocationsView,
@@ -17,7 +18,10 @@ from .views import (
     ChildSafetyScoreView,
     ChildStatsSummaryView,
     CompleteDeviceCommandView,
+    DeactivateMonitoringView,
     LatestAroundAudioView,
+    MonitorSignalPollView,
+    MonitorSignalSendView,
     ParentAlertsView,
     PendingDeviceCommandsView,
     SafeZoneViewSet,
@@ -48,6 +52,10 @@ urlpatterns = [
     path("children/<int:child_id>/app-limits/", ChildAppLimitView.as_view()),
     path("children/<int:child_id>/blocked-apps/", BlockedAppsView.as_view()),
     path("children/<int:child_id>/blocked-apps/<int:blocked_id>/", UnblockAppView.as_view()),
+    path("monitor/activate/", ActivateMonitoringView.as_view()),
+    path("monitor/deactivate/", DeactivateMonitoringView.as_view()),
+    path("monitor/signal/send/", MonitorSignalSendView.as_view()),
+    path("monitor/signal/poll/", MonitorSignalPollView.as_view()),
     path("sos/", SosView.as_view()),
     path("alerts/", ParentAlertsView.as_view()),
     path("alerts/<int:alert_id>/read/", AlertReadView.as_view()),

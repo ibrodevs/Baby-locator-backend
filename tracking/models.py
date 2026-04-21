@@ -315,3 +315,74 @@ class AroundAudioClip(models.Model):
 
     def __str__(self):
         return f"{self.child.username}: around audio {self.id}"
+
+
+class MonitorSession(models.Model):
+    """
+    REST-based WebRTC signaling relay.
+
+    Instead of WebSockets the client devices poll this table to exchange
+    SDP offers/answers and ICE candidates needed to establish a direct
+    peer-to-peer WebRTC audio connection.
+    """
+
+    STATUS_WAITING = "waiting"
+    STATUS_ACTIVE = "active"
+    STATUS_CLOSED = "closed"
+    STATUS_CHOICES = [
+        (STATUS_WAITING, "Waiting"),
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_CLOSED, "Closed"),
+    ]
+
+    parent = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="monitor_sessions_as_parent",
+    )
+    child = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="monitor_sessions_as_child",
+    )
+    session_token = models.CharField(max_length=64, unique=True, db_index=True)
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_WAITING,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @staticmethod
+    def new_token():
+        return uuid4().hex
+
+    def __str__(self):
+        return f"monitor {self.session_token[:8]} ({self.status})"
+
+
+class SignalingMessage(models.Model):
+    """
+    A single signaling message (SDP offer, SDP answer, or ICE candidate)
+    stored in the database and fetched by the other peer via polling.
+    """
+
+    session = models.ForeignKey(
+        MonitorSession,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    sender_role = models.CharField(max_length=8)  # "parent" or "child"
+    msg_type = models.CharField(max_length=16)  # "offer", "answer", "ice_candidate"
+    payload = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.sender_role}: {self.msg_type} (session {self.session_id})"

@@ -28,8 +28,10 @@ from .models import (
     DeviceDailySummary,
     DeviceStatus,
     LocationUpdate,
+    MonitorSession,
     RemoteDeviceCommand,
     SafeZone,
+    SignalingMessage,
 )
 from .fcm import send_command_push, send_notification_push
 from .serializers import (
@@ -957,6 +959,189 @@ class AroundAudioStreamView(APIView):
             clip.audio.open("rb"),
             content_type=content_type or "audio/mp4",
         )
+
+
+class ActivateMonitoringView(APIView):
+    """
+    Parent creates a MonitorSession and sends FCM push to wake the child.
+    Returns session_token that both sides use for signaling.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.role != User.ROLE_PARENT:
+            return Response({"detail": "parents only"}, status=403)
+
+        child_id = request.data.get("child_id")
+        if not child_id:
+            return Response({"detail": "child_id required"}, status=400)
+
+        child = get_object_or_404(User, id=child_id, role=User.ROLE_CHILD)
+        if not _ensure_parent_child_relationship(request.user, child):
+            return Response({"detail": "forbidden"}, status=403)
+
+        # Close any stale sessions for this parent-child pair.
+        MonitorSession.objects.filter(
+            parent=request.user,
+            child=child,
+        ).exclude(status=MonitorSession.STATUS_CLOSED).update(
+            status=MonitorSession.STATUS_CLOSED,
+        )
+
+        session = MonitorSession.objects.create(
+            parent=request.user,
+            child=child,
+            session_token=MonitorSession.new_token(),
+        )
+
+        if child.fcm_token:
+            send_command_push(
+                child.fcm_token,
+                "webrtc_monitor_start",
+                extra_data={"session_token": session.session_token},
+            )
+
+        return Response({
+            "session_token": session.session_token,
+        })
+
+
+class DeactivateMonitoringView(APIView):
+    """Parent closes the MonitorSession and notifies the child via FCM."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.role != User.ROLE_PARENT:
+            return Response({"detail": "parents only"}, status=403)
+
+        session_token = (request.data.get("session_token") or "").strip()
+        child_id = request.data.get("child_id")
+
+        if session_token:
+            MonitorSession.objects.filter(
+                session_token=session_token,
+                parent=request.user,
+            ).exclude(status=MonitorSession.STATUS_CLOSED).update(
+                status=MonitorSession.STATUS_CLOSED,
+            )
+
+        if child_id:
+            child = get_object_or_404(User, id=child_id, role=User.ROLE_CHILD)
+            if child.fcm_token:
+                send_command_push(
+                    child.fcm_token,
+                    "webrtc_monitor_stop",
+                    extra_data={
+                        "session_token": session_token,
+                    },
+                )
+
+        return Response({"detail": "ok"})
+
+
+class MonitorSignalSendView(APIView):
+    """
+    Post a signaling message (SDP offer/answer or ICE candidate).
+    Both parent and child call this endpoint.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_token = (request.data.get("session_token") or "").strip()
+        msg_type = (request.data.get("type") or "").strip()
+        payload = request.data.get("payload")
+
+        if not session_token or not msg_type or payload is None:
+            return Response(
+                {"detail": "session_token, type, and payload are required"},
+                status=400,
+            )
+
+        session = get_object_or_404(
+            MonitorSession,
+            session_token=session_token,
+        )
+
+        # Determine sender role from the authenticated user.
+        if request.user.id == session.parent_id:
+            sender_role = "parent"
+        elif request.user.id == session.child_id:
+            sender_role = "child"
+        else:
+            return Response({"detail": "forbidden"}, status=403)
+
+        if session.status == MonitorSession.STATUS_CLOSED:
+            return Response({"detail": "session closed"}, status=410)
+
+        # Mark session active once the child sends an offer.
+        if (
+            sender_role == "child"
+            and msg_type == "offer"
+            and session.status == MonitorSession.STATUS_WAITING
+        ):
+            session.status = MonitorSession.STATUS_ACTIVE
+            session.save(update_fields=["status"])
+
+        SignalingMessage.objects.create(
+            session=session,
+            sender_role=sender_role,
+            msg_type=msg_type,
+            payload=payload,
+        )
+
+        return Response({"detail": "ok"}, status=201)
+
+
+class MonitorSignalPollView(APIView):
+    """
+    Poll for new signaling messages from the other peer.
+    Returns messages addressed to the caller (i.e. sent by the *other* role).
+
+    Query params:
+      - session_token (required)
+      - after_id (optional) — only return messages with id > after_id
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        session_token = (request.query_params.get("session_token") or "").strip()
+        if not session_token:
+            return Response({"detail": "session_token required"}, status=400)
+
+        session = get_object_or_404(
+            MonitorSession,
+            session_token=session_token,
+        )
+
+        if request.user.id == session.parent_id:
+            other_role = "child"
+        elif request.user.id == session.child_id:
+            other_role = "parent"
+        else:
+            return Response({"detail": "forbidden"}, status=403)
+
+        qs = session.messages.filter(sender_role=other_role)
+
+        after_id = request.query_params.get("after_id")
+        if after_id:
+            try:
+                qs = qs.filter(id__gt=int(after_id))
+            except (TypeError, ValueError):
+                return Response({"detail": "invalid after_id"}, status=400)
+
+        messages = list(qs[:50])
+
+        return Response({
+            "session_status": session.status,
+            "messages": [
+                {
+                    "id": m.id,
+                    "type": m.msg_type,
+                    "payload": m.payload,
+                }
+                for m in messages
+            ],
+        })
 
 
 class SosView(APIView):
