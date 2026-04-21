@@ -796,6 +796,30 @@ class ChildAppLimitView(APIView):
                 "enabled": data["enabled"],
             },
         )
+
+        if app_limit.enabled:
+            today_snapshot = (
+                child.app_usage_snapshots.filter(
+                    usage_date=timezone.localdate(),
+                    package_name=app_limit.package_name,
+                )
+                .order_by("-usage_minutes", "-last_used_at", "-updated_at")
+                .first()
+            )
+            if (
+                today_snapshot is not None
+                and today_snapshot.usage_minutes > app_limit.daily_limit_minutes
+            ):
+                blocked, created = BlockedApp.objects.get_or_create(
+                    child=child,
+                    package_name=app_limit.package_name,
+                    defaults={"app_name": today_snapshot.app_name or app_limit.app_name},
+                )
+                if created or blocked.app_name != (today_snapshot.app_name or app_limit.app_name):
+                    blocked.app_name = today_snapshot.app_name or app_limit.app_name
+                    blocked.save(update_fields=["app_name"])
+                BlockedAppsView._send_sync_command(child, request.user)
+
         return Response(AppLimitSerializer(app_limit).data)
 
 
@@ -827,6 +851,8 @@ class ChildDeviceCommandCreateView(APIView):
             RemoteDeviceCommand.TYPE_LOUD_STOP,
             RemoteDeviceCommand.TYPE_AROUND_START,
             RemoteDeviceCommand.TYPE_AROUND_STOP,
+            RemoteDeviceCommand.TYPE_WEBRTC_MONITOR_START,
+            RemoteDeviceCommand.TYPE_WEBRTC_MONITOR_STOP,
         ):
             send_command_push(
                 child.fcm_token,
@@ -994,6 +1020,15 @@ class ActivateMonitoringView(APIView):
             session_token=MonitorSession.new_token(),
         )
 
+        # Create a polling-backed command so the child picks it up even if FCM
+        # is unavailable / delayed. The background service polls every 2s.
+        RemoteDeviceCommand.objects.create(
+            child=child,
+            created_by=request.user,
+            command_type=RemoteDeviceCommand.TYPE_WEBRTC_MONITOR_START,
+            payload={"session_token": session.session_token},
+        )
+
         if child.fcm_token:
             send_command_push(
                 child.fcm_token,
@@ -1027,6 +1062,12 @@ class DeactivateMonitoringView(APIView):
 
         if child_id:
             child = get_object_or_404(User, id=child_id, role=User.ROLE_CHILD)
+            RemoteDeviceCommand.objects.create(
+                child=child,
+                created_by=request.user,
+                command_type=RemoteDeviceCommand.TYPE_WEBRTC_MONITOR_STOP,
+                payload={"session_token": session_token},
+            )
             if child.fcm_token:
                 send_command_push(
                     child.fcm_token,
@@ -1265,6 +1306,9 @@ class BlockedAppsView(APIView):
             package_name=s.validated_data["package_name"],
             defaults={"app_name": s.validated_data["app_name"]},
         )
+        if blocked.app_name != s.validated_data["app_name"]:
+            blocked.app_name = s.validated_data["app_name"]
+            blocked.save(update_fields=["app_name"])
 
         # Send command to child to refresh blocked apps list.
         self._send_sync_command(child, request.user)

@@ -103,7 +103,10 @@ def send_notification_push(fcm_token: str, notification_type: str, title: str, b
                 ),
             ),
             apns=messaging.APNSConfig(
-                headers={"apns-priority": "10"},
+                headers={
+                    "apns-priority": "10",
+                    "apns-push-type": "alert",
+                },
                 payload=messaging.APNSPayload(
                     aps=messaging.Aps(
                         alert=messaging.ApsAlert(

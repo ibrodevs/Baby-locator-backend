@@ -208,12 +208,16 @@ class RemoteDeviceCommand(models.Model):
     TYPE_AROUND_START = "around_start"
     TYPE_AROUND_STOP = "around_stop"
     TYPE_SYNC_BLOCKED_APPS = "sync_blocked_apps"
+    TYPE_WEBRTC_MONITOR_START = "webrtc_monitor_start"
+    TYPE_WEBRTC_MONITOR_STOP = "webrtc_monitor_stop"
     TYPE_CHOICES = [
         (TYPE_LOUD, "Loud"),
         (TYPE_LOUD_STOP, "Loud Stop"),
         (TYPE_AROUND_START, "Around Start"),
         (TYPE_AROUND_STOP, "Around Stop"),
         (TYPE_SYNC_BLOCKED_APPS, "Sync Blocked Apps"),
+        (TYPE_WEBRTC_MONITOR_START, "WebRTC Monitor Start"),
+        (TYPE_WEBRTC_MONITOR_STOP, "WebRTC Monitor Stop"),
     ]
 
     STATUS_PENDING = "pending"
