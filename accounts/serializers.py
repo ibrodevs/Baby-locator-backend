@@ -10,7 +10,15 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "username", "role", "display_name", "parent", "avatar_url"]
+        fields = [
+            "id",
+            "username",
+            "role",
+            "display_name",
+            "gender",
+            "parent",
+            "avatar_url",
+        ]
 
     def get_avatar_url(self, obj):
         if obj.avatar:
@@ -54,18 +62,53 @@ class LoginSerializer(serializers.Serializer):
 
 
 class CreateChildSerializer(serializers.Serializer):
-    username = serializers.CharField()
-    password = serializers.CharField(write_only=True, min_length=4)
+    username = serializers.CharField(required=False, allow_blank=True)
+    password = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        min_length=4,
+    )
     display_name = serializers.CharField(required=False, allow_blank=True)
+    gender = serializers.CharField(required=False, allow_blank=True)
 
-    def validate_username(self, v):
-        if User.objects.filter(username=v).exists():
-            raise serializers.ValidationError("already taken")
-        return v
+    def validate(self, attrs):
+        username = attrs.get("username", "").strip()
+        password = attrs.get("password", "")
+        gender = attrs.get("gender", "").strip()
+
+        if username:
+            if User.objects.filter(username=username).exists():
+                raise serializers.ValidationError({"username": "already taken"})
+            if len(password) < 4:
+                raise serializers.ValidationError(
+                    {"password": "Ensure this field has at least 4 characters."}
+                )
+            attrs["username"] = username
+        else:
+            attrs.pop("username", None)
+            attrs.pop("password", None)
+
+        if gender and gender not in {User.GENDER_BOY, User.GENDER_GIRL}:
+            raise serializers.ValidationError({"gender": "invalid value"})
+
+        if "display_name" in attrs:
+            attrs["display_name"] = attrs["display_name"].strip()
+        if gender:
+            attrs["gender"] = gender
+
+        return attrs
 
 
 class UpdateChildSerializer(serializers.Serializer):
     display_name = serializers.CharField(required=False, allow_blank=True)
+    gender = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_gender(self, value):
+        value = value.strip()
+        if value and value not in {User.GENDER_BOY, User.GENDER_GIRL}:
+            raise serializers.ValidationError("invalid value")
+        return value
 
 
 class UpdateProfileSerializer(serializers.Serializer):
@@ -85,12 +128,10 @@ class UpdateProfileSerializer(serializers.Serializer):
 
 class RegisterChildWithCodeSerializer(serializers.Serializer):
     code = serializers.CharField()
-    display_name = serializers.CharField()
+    display_name = serializers.CharField(required=False, allow_blank=True)
 
     def validate_display_name(self, value):
         value = value.strip()
-        if not value:
-            raise serializers.ValidationError("This field may not be blank.")
         return value
 
 

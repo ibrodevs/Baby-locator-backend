@@ -30,6 +30,24 @@ def _generate_child_credentials():
             return username, secrets.token_urlsafe(18)
 
 
+def _get_parent_child_for_request(request):
+    raw_child_id = request.data.get("child_id") or request.query_params.get("child_id")
+    if raw_child_id in (None, ""):
+        return None, None
+
+    try:
+        child_id = int(raw_child_id)
+    except (TypeError, ValueError):
+        return None, Response({"detail": "invalid child_id"}, status=400)
+
+    try:
+        child = request.user.children.get(id=child_id)
+    except User.DoesNotExist:
+        return None, Response({"detail": "child not found"}, status=404)
+
+    return child, None
+
+
 class RegisterParentView(APIView):
     permission_classes = [AllowAny]
 
@@ -86,10 +104,15 @@ class ChildrenView(APIView):
             return Response({"detail": "parents only"}, status=403)
         s = CreateChildSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+        username = s.validated_data.get("username")
+        password = s.validated_data.get("password")
+        if not username:
+            username, password = _generate_child_credentials()
         child = User.objects.create_user(
-            username=s.validated_data["username"],
-            password=s.validated_data["password"],
+            username=username,
+            password=password,
             display_name=s.validated_data.get("display_name", ""),
+            gender=s.validated_data.get("gender", ""),
             role=User.ROLE_CHILD,
             parent=request.user,
         )
@@ -122,6 +145,8 @@ class ChildDetailView(APIView):
         s.is_valid(raise_exception=True)
         if "display_name" in s.validated_data:
             child.display_name = s.validated_data["display_name"]
+        if "gender" in s.validated_data:
+            child.gender = s.validated_data["gender"]
         child.save()
         return Response(UserSerializer(child, context={"request": request}).data)
 
@@ -182,9 +207,13 @@ class InviteCodeView(APIView):
     def get(self, request):
         if request.user.role != User.ROLE_PARENT:
             return Response({"detail": "parents only"}, status=403)
+        child, err = _get_parent_child_for_request(request)
+        if err:
+            return err
         invite = (
             InviteCode.objects.filter(
                 parent=request.user,
+                child=child,
                 used_by__isnull=True,
                 expires_at__gt=timezone.now(),
             )
@@ -195,16 +224,21 @@ class InviteCodeView(APIView):
             return Response({"code": None})
         return Response({
             "code": invite.code,
+            "child_id": invite.child_id,
             "expires_at": invite.expires_at.isoformat(),
         })
 
     def post(self, request):
         if request.user.role != User.ROLE_PARENT:
             return Response({"detail": "parents only"}, status=403)
+        child, err = _get_parent_child_for_request(request)
+        if err:
+            return err
         # Reuse existing valid code if available
         invite = (
             InviteCode.objects.filter(
                 parent=request.user,
+                child=child,
                 used_by__isnull=True,
                 expires_at__gt=timezone.now(),
             )
@@ -218,10 +252,12 @@ class InviteCodeView(APIView):
             invite = InviteCode.objects.create(
                 code=code,
                 parent=request.user,
+                child=child,
                 expires_at=timezone.now() + timedelta(days=3),
             )
         return Response({
             "code": invite.code,
+            "child_id": invite.child_id,
             "expires_at": invite.expires_at.isoformat(),
         }, status=status.HTTP_201_CREATED)
 
@@ -233,14 +269,30 @@ class RegisterChildWithCodeView(APIView):
     def post(self, request):
         s = RegisterChildWithCodeSerializer(data=request.data)
         s.is_valid(raise_exception=True)
-        code_str = s.validated_data["code"].strip().upper()
-        display_name = s.validated_data["display_name"]
+        code_str = "".join(ch for ch in s.validated_data["code"] if ch.isdigit())
+        display_name = s.validated_data.get("display_name", "")
         try:
             invite = InviteCode.objects.get(code=code_str)
         except InviteCode.DoesNotExist:
             return Response({"detail": "Invalid invite code"}, status=400)
         if invite.expires_at <= timezone.now():
             return Response({"detail": "Invite code expired"}, status=400)
+
+        if invite.child_id:
+            child = invite.child
+            return Response(
+                {
+                    "token": token_for(child),
+                    "user": UserSerializer(child, context={"request": request}).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if not display_name:
+            return Response(
+                {"detail": "Child profile is not ready for this code"},
+                status=400,
+            )
 
         child = (
             invite.parent.children.filter(display_name__iexact=display_name)
@@ -269,12 +321,15 @@ class RegisterChildWithCodeView(APIView):
 def invite_landing(request, code):
     """Landing page for invite links — shows code and instructions."""
     try:
-        invite = InviteCode.objects.get(code=code.upper())
+        normalized_code = "".join(ch for ch in code if ch.isdigit())
+        invite = InviteCode.objects.get(code=normalized_code)
         valid = invite.is_valid
         parent_name = invite.parent.display_name or invite.parent.username
+        child_name = invite.child.display_name if invite.child else ""
     except InviteCode.DoesNotExist:
         valid = False
         parent_name = ""
+        child_name = ""
 
     if valid:
         html = f"""<!DOCTYPE html>
@@ -307,15 +362,15 @@ def invite_landing(request, code):
 <div class="card">
   <div class="icon">&#x1F46A;</div>
   <h1>Вас приглашают!</h1>
-  <p class="sub"><span class="parent">{parent_name}</span> приглашает вас в семейный круг Kid Security</p>
+  <p class="sub"><span class="parent">{parent_name}</span> подготовил подключение{f' для {child_name}' if child_name else ''} в Kid Security</p>
   <div class="code-box">
     <div class="code">{invite.code}</div>
-    <div class="label">Код приглашения</div>
+    <div class="label">Код для входа ребёнка</div>
   </div>
   <ol class="steps">
     <li>Скачайте приложение <b>Kid Security</b></li>
-    <li>Откройте и выберите <b>«Я ребёнок»</b></li>
-    <li>Введите код выше и затем укажите отображаемое имя</li>
+    <li>Откройте приложение</li>
+    <li>Введите код выше на первом экране</li>
   </ol>
 </div>
 </body>

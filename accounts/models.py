@@ -4,19 +4,30 @@ import string
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils import timezone
-from datetime import timedelta
 
 
 class User(AbstractUser):
     ROLE_PARENT = "parent"
     ROLE_CHILD = "child"
+    GENDER_BOY = "boy"
+    GENDER_GIRL = "girl"
     ROLE_CHOICES = [
         (ROLE_PARENT, "Parent"),
         (ROLE_CHILD, "Child"),
     ]
+    GENDER_CHOICES = [
+        (GENDER_BOY, "Boy"),
+        (GENDER_GIRL, "Girl"),
+    ]
 
     role = models.CharField(max_length=16, choices=ROLE_CHOICES, default=ROLE_PARENT)
     display_name = models.CharField(max_length=120, blank=True)
+    gender = models.CharField(
+        max_length=16,
+        choices=GENDER_CHOICES,
+        blank=True,
+        default="",
+    )
     avatar = models.ImageField(upload_to="avatars/", null=True, blank=True)
     parent = models.ForeignKey(
         "self",
@@ -38,6 +49,13 @@ class InviteCode(models.Model):
         on_delete=models.CASCADE,
         related_name="invite_codes",
     )
+    child = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="child_invite_codes",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     used_by = models.ForeignKey(
@@ -50,14 +68,13 @@ class InviteCode(models.Model):
 
     @staticmethod
     def generate_code():
-        chars = string.ascii_uppercase + string.digits
-        part1 = "".join(random.choices(chars, k=3))
-        part2 = "".join(random.choices(chars, k=4))
-        return f"{part1}-{part2}"
+        return "".join(random.choices(string.digits, k=6))
 
     @property
     def is_valid(self):
         return self.used_by is None and self.expires_at > timezone.now()
 
     def __str__(self):
+        if self.child_id:
+            return f"{self.code} (child={self.child.username})"
         return f"{self.code} (parent={self.parent.username})"
