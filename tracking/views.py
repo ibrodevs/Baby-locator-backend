@@ -238,10 +238,14 @@ class ChildLatestLocationView(APIView):
         loc = child.locations.first()
         if not loc:
             return Response({"detail": "no location yet"}, status=404)
+        device_status = getattr(child, "device_status", None)
         data = LocationSerializer(loc).data
+        if data.get("battery") is None and device_status:
+            data["battery"] = device_status.battery
         if "charging" not in data:
-            device_status = getattr(child, "device_status", None)
             data["charging"] = device_status.charging if device_status else False
+        elif data.get("charging") is None and device_status:
+            data["charging"] = device_status.charging
         return Response(data)
 
 
@@ -266,14 +270,22 @@ class AllChildrenLocationsView(APIView):
         for child in children:
             loc = child.locations.first()
             device_status = getattr(child, "device_status", None)
+            location_data = LocationSerializer(loc).data if loc else None
+            battery = (
+                location_data.get("battery")
+                if location_data is not None and location_data.get("battery") is not None
+                else (device_status.battery if device_status else None)
+            )
+            charging = (
+                location_data.get("charging")
+                if location_data is not None and location_data.get("charging") is not None
+                else (device_status.charging if device_status else False)
+            )
             entry = {
                 "child": UserSerializer(child, context={"request": request}).data,
-                "location": LocationSerializer(loc).data if loc else None,
-                "charging": (
-                    loc.charging
-                    if loc is not None
-                    else (device_status.charging if device_status else False)
-                ),
+                "location": location_data,
+                "battery": battery,
+                "charging": charging,
             }
             result.append(entry)
         return Response(result)
