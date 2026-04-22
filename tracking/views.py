@@ -302,6 +302,7 @@ class ChildActivityView(APIView):
         last_address = None
         last_battery = None
         last_zone_name = None
+        last_charging = None
 
         for loc in locations:
             ts = loc.created_at.isoformat()
@@ -342,9 +343,22 @@ class ChildActivityView(APIView):
             if loc.address:
                 last_address = loc.address
 
+            if loc.charging and last_charging is not True:
+                events.append({
+                    "type": "charging",
+                    "icon": "bolt",
+                    "title": "Phone Charging",
+                    "subtitle": (
+                        f"Телефон поставлен на зарядку · {loc.battery}%"
+                        if loc.battery is not None
+                        else "Телефон поставлен на зарядку"
+                    ),
+                    "time": ts,
+                })
+
             # Battery events
             if loc.battery is not None and last_battery is not None:
-                if loc.battery > last_battery + 5:
+                if loc.battery > last_battery + 5 and not loc.charging:
                     events.append({
                         "type": "charging",
                         "icon": "bolt",
@@ -362,6 +376,7 @@ class ChildActivityView(APIView):
                     })
             if loc.battery is not None:
                 last_battery = loc.battery
+            last_charging = loc.charging
 
         # If no events today, show current status
         if not events and locations:

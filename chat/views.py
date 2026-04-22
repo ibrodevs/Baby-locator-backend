@@ -20,6 +20,10 @@ from .serializers import (
 )
 
 
+def _chat_sender_label(user):
+    return "родителя" if user.role == User.ROLE_PARENT else "ребёнка"
+
+
 class ChatMessagesView(APIView):
     """
     GET  /api/chat/<child_id>/messages/ — list messages between current user and child
@@ -88,18 +92,18 @@ class ChatMessagesView(APIView):
                 child=child,
                 parent=child.parent,
                 alert_type=Alert.TYPE_CHAT_MESSAGE,
-                title=f"Сообщение от {user.display_name or user.username}",
+                title=f"Сообщение от {_chat_sender_label(user)}",
                 message=text[:200] if text else f"📎 {uploaded_file.name}" if uploaded_file else "",
             )
 
         # Send FCM push to the receiver
-        sender_name = user.display_name or user.username
+        sender_label = _chat_sender_label(user)
         push_body = text[:200] if text else f"📎 {uploaded_file.name}" if uploaded_file else ""
         if receiver.fcm_token:
             send_notification_push(
                 receiver.fcm_token,
                 notification_type="chat_message",
-                title=f"Сообщение от {sender_name}",
+                title=f"Сообщение от {sender_label}",
                 body=push_body,
                 extra_data={
                     "message_id": msg.id,
@@ -197,7 +201,6 @@ class TaskListView(APIView):
         )
 
         # Send FCM push to child about new task
-        parent_name = request.user.display_name or request.user.username
         if child.fcm_token:
             alert = Alert.objects.create(
                 child=child,
@@ -209,7 +212,7 @@ class TaskListView(APIView):
             send_notification_push(
                 child.fcm_token,
                 notification_type="task_assigned",
-                title=f"Новое задание от {parent_name}",
+                title="Новое задание от родителя",
                 body=task.title,
                 extra_data={
                     "child_id": child.id,
@@ -403,21 +406,19 @@ class ChildNotificationsView(APIView):
         notifications = []
 
         for msg in unread_messages:
-            sender_name = msg.sender.display_name or msg.sender.username
             notifications.append({
                 "id": f"msg_{msg.id}",
                 "type": "chat_message",
-                "title": f"Сообщение от {sender_name}",
+                "title": f"Сообщение от {_chat_sender_label(msg.sender)}",
                 "body": msg.text[:200],
                 "created_at": msg.created_at.isoformat(),
             })
 
         for task in pending_tasks:
-            parent_name = task.parent.display_name or task.parent.username
             notifications.append({
                 "id": f"task_{task.id}",
                 "type": "task_assigned",
-                "title": f"Задание от {parent_name}",
+                "title": "Задание от родителя",
                 "body": task.title,
                 "created_at": task.created_at.isoformat(),
             })

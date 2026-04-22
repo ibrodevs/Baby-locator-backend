@@ -24,7 +24,7 @@ class MessageSerializer(serializers.ModelSerializer):
         ]
 
     def get_sender_name(self, obj):
-        return obj.sender.display_name or obj.sender.username
+        return "Родитель" if obj.sender.role == "parent" else "Ребёнок"
 
     def get_sender_avatar_url(self, obj):
         if not obj.sender.avatar:
