@@ -1,4 +1,5 @@
 import calendar
+import logging
 import math
 import mimetypes
 import re
@@ -49,6 +50,8 @@ from .serializers import (
     RemoteDeviceCommandSerializer,
     SafeZoneSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _haversine_m(lat1, lng1, lat2, lng2):
@@ -937,6 +940,14 @@ class CompleteDeviceCommandView(APIView):
         command.error_message = serializer.validated_data.get("error_message", "")
         command.completed_at = timezone.now()
         command.save(update_fields=["status", "error_message", "completed_at"])
+        if command.status == RemoteDeviceCommand.STATUS_FAILED:
+            logger.warning(
+                "Device command failed: child_id=%s command_id=%s type=%s error=%s",
+                command.child_id,
+                command.id,
+                command.command_type,
+                command.error_message,
+            )
         return Response(RemoteDeviceCommandSerializer(command).data)
 
 
@@ -962,6 +973,13 @@ class AroundAudioUploadView(APIView):
             session_token=session_token,
             audio=uploaded,
             duration_seconds=max(duration_seconds, 0),
+        )
+        logger.info(
+            "Around audio uploaded: child_id=%s session=%s clip_id=%s duration=%ss",
+            request.user.id,
+            session_token,
+            clip.id,
+            clip.duration_seconds,
         )
         return Response(
             AroundAudioClipSerializer(clip, context={"request": request}).data,
