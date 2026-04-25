@@ -895,7 +895,7 @@ class PendingDeviceCommandsView(APIView):
 
     def get(self, request):
         if request.user.role != User.ROLE_CHILD:
-            return Response({"detail": "children only"}, status=403)
+            return Response([])
 
         commands = list(
             request.user.device_commands.filter(
