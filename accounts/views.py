@@ -184,6 +184,13 @@ class FcmTokenView(APIView):
         fcm_token = request.data.get("fcm_token", "").strip()
         if not fcm_token:
             return Response({"detail": "fcm_token is required"}, status=400)
+        # One physical app install should belong to exactly one backend user.
+        # If the same device was previously used by another account (for
+        # example child -> parent or parent -> child), clear the stale mapping
+        # first so command pushes don't wake the wrong session.
+        User.objects.filter(fcm_token=fcm_token).exclude(id=request.user.id).update(
+            fcm_token=""
+        )
         request.user.fcm_token = fcm_token
         request.user.save(update_fields=["fcm_token"])
         return Response({"status": "ok"})
