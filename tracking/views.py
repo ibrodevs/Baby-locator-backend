@@ -7,7 +7,7 @@ from datetime import date as dt_date
 from datetime import timedelta
 
 from django.db import transaction
-from django.http import FileResponse
+from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -20,6 +20,7 @@ from rest_framework.views import APIView
 from accounts.models import User
 from accounts.serializers import UserSerializer
 
+from .live_audio import live_audio_broker
 from .models import (
     Alert,
     AppLimit,
@@ -52,6 +53,10 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+LIVE_AUDIO_DEFAULT_SAMPLE_RATE = 16000
+LIVE_AUDIO_DEFAULT_CHANNELS = 1
+LIVE_AUDIO_FORMAT = "pcm_s16le"
 
 
 def _haversine_m(lat1, lng1, lat2, lng2):
@@ -96,6 +101,14 @@ def _sanitize_address(value):
     if re.fullmatch(coordinate_pattern, address):
         return ""
     return address
+
+
+def _coerce_positive_int(value, default):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _parse_selected_month(raw_value, fallback):
@@ -1030,6 +1043,112 @@ class AroundAudioStreamView(APIView):
             clip.audio.open("rb"),
             content_type=content_type or "audio/mp4",
         )
+
+
+class AroundAudioLiveUploadView(APIView):
+    """Child -> backend: one long-lived HTTP upload with raw PCM chunks."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.role != User.ROLE_CHILD:
+            return Response({"detail": "children only"}, status=403)
+
+        session_token = (request.query_params.get("session_token") or "").strip()
+        if not session_token:
+            return Response({"detail": "session_token is required"}, status=400)
+
+        sample_rate = _coerce_positive_int(
+            request.headers.get("X-Audio-Sample-Rate"),
+            LIVE_AUDIO_DEFAULT_SAMPLE_RATE,
+        )
+        channels = _coerce_positive_int(
+            request.headers.get("X-Audio-Channels"),
+            LIVE_AUDIO_DEFAULT_CHANNELS,
+        )
+
+        session = live_audio_broker.get_or_create(
+            session_token,
+            child_id=request.user.id,
+            sample_rate=sample_rate,
+            channels=channels,
+            audio_format=LIVE_AUDIO_FORMAT,
+        )
+        chunk_count = 0
+        byte_count = 0
+
+        try:
+            stream = request.META["wsgi.input"]
+            while True:
+                chunk = stream.read(4096)
+                if not chunk:
+                    break
+                chunk_count += 1
+                byte_count += len(chunk)
+                live_audio_broker.publish(
+                    session_token,
+                    child_id=request.user.id,
+                    data=chunk,
+                )
+        finally:
+            live_audio_broker.finish(session_token, child_id=request.user.id)
+
+        logger.info(
+            "Around live audio upload finished: child_id=%s session=%s chunks=%s bytes=%s rate=%s channels=%s",
+            request.user.id,
+            session_token,
+            chunk_count,
+            byte_count,
+            session.sample_rate,
+            session.channels,
+        )
+        return Response(
+            {
+                "status": "ok",
+                "session_token": session_token,
+                "sample_rate": session.sample_rate,
+                "channels": session.channels,
+                "format": session.format,
+                "bytes_received": byte_count,
+                "chunks_received": chunk_count,
+            }
+        )
+
+
+class AroundAudioLiveStreamView(APIView):
+    """Parent <- backend: one long-lived HTTP download of raw PCM chunks."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, child_id):
+        child = get_object_or_404(User, id=child_id, role=User.ROLE_CHILD)
+        if not _ensure_parent_child_relationship(request.user, child):
+            return Response({"detail": "forbidden"}, status=403)
+
+        session_token = (request.query_params.get("session_token") or "").strip()
+        if not session_token:
+            return Response({"detail": "session_token is required"}, status=400)
+
+        session = live_audio_broker.get_or_create(
+            session_token,
+            child_id=child.id,
+            sample_rate=LIVE_AUDIO_DEFAULT_SAMPLE_RATE,
+            channels=LIVE_AUDIO_DEFAULT_CHANNELS,
+            audio_format=LIVE_AUDIO_FORMAT,
+        )
+
+        response = StreamingHttpResponse(
+            streaming_content=live_audio_broker.iter_chunks(
+                session_token,
+                child_id=child.id,
+            ),
+            content_type="application/octet-stream",
+        )
+        response["Cache-Control"] = "no-store"
+        response["X-Audio-Sample-Rate"] = str(session.sample_rate)
+        response["X-Audio-Channels"] = str(session.channels)
+        response["X-Audio-Format"] = session.format
+        return response
 
 
 class ActivateMonitoringView(APIView):
