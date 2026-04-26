@@ -1,12 +1,16 @@
 from django.contrib.auth import authenticate
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 
-from .models import User
+from .models import InviteCode, User
 
 
 class UserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
+    has_joined = serializers.SerializerMethodField()
+    active_invite_code = serializers.SerializerMethodField()
+    invite_expires_at = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -18,6 +22,9 @@ class UserSerializer(serializers.ModelSerializer):
             "gender",
             "parent",
             "avatar_url",
+            "has_joined",
+            "active_invite_code",
+            "invite_expires_at",
         ]
 
     def get_avatar_url(self, obj):
@@ -27,6 +34,42 @@ class UserSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.avatar.url)
             return obj.avatar.url
         return None
+
+    def get_has_joined(self, obj):
+        return obj.joined_at is not None
+
+    def get_active_invite_code(self, obj):
+        invite = self._get_active_invite(obj)
+        return invite.code if invite else None
+
+    def get_invite_expires_at(self, obj):
+        invite = self._get_active_invite(obj)
+        return invite.expires_at.isoformat() if invite else None
+
+    def _get_active_invite(self, obj):
+        if obj.role != User.ROLE_CHILD or obj.joined_at is not None:
+            return None
+
+        request = self.context.get("request")
+        parent = None
+        if request and getattr(request.user, "role", None) == User.ROLE_PARENT:
+            parent = request.user
+        elif obj.parent_id:
+            parent = obj.parent
+
+        if parent is None:
+            return None
+
+        return (
+            InviteCode.objects.filter(
+                parent=parent,
+                child=obj,
+                used_by__isnull=True,
+                expires_at__gt=timezone.now(),
+            )
+            .order_by("-created_at")
+            .first()
+        )
 
 
 class RegisterParentSerializer(serializers.Serializer):

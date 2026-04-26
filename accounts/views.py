@@ -48,6 +48,12 @@ def _get_parent_child_for_request(request):
     return child, None
 
 
+def _mark_child_joined(user):
+    if user.role == User.ROLE_CHILD and user.joined_at is None:
+        user.joined_at = timezone.now()
+        user.save(update_fields=["joined_at"])
+
+
 class RegisterParentView(APIView):
     permission_classes = [AllowAny]
 
@@ -68,6 +74,7 @@ class LoginView(APIView):
         s = LoginSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         user = s.validated_data["user"]
+        _mark_child_joined(user)
         return Response({"token": token_for(user), "user": UserSerializer(user, context={"request": request}).data})
 
 
@@ -193,6 +200,7 @@ class FcmTokenView(APIView):
         )
         request.user.fcm_token = fcm_token
         request.user.save(update_fields=["fcm_token"])
+        _mark_child_joined(request.user)
         return Response({"status": "ok"})
 
 
@@ -287,6 +295,7 @@ class RegisterChildWithCodeView(APIView):
 
         if invite.child_id:
             child = invite.child
+            _mark_child_joined(child)
             return Response(
                 {
                     "token": token_for(child),
@@ -318,6 +327,8 @@ class RegisterChildWithCodeView(APIView):
                 parent=invite.parent,
             )
             status_code = status.HTTP_201_CREATED
+
+        _mark_child_joined(child)
 
         return Response(
             {"token": token_for(child), "user": UserSerializer(child, context={"request": request}).data},

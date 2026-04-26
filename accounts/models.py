@@ -29,6 +29,7 @@ class User(AbstractUser):
         default="",
     )
     avatar = models.ImageField(upload_to="avatars/", null=True, blank=True)
+    joined_at = models.DateTimeField(null=True, blank=True)
     parent = models.ForeignKey(
         "self",
         null=True,
