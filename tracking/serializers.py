@@ -104,6 +104,13 @@ class DeviceStatusSerializer(serializers.ModelSerializer):
             "battery",
             "charging",
             "usage_access_granted",
+            "location_service_enabled",
+            "location_permission_granted",
+            "background_location_granted",
+            "microphone_granted",
+            "notifications_granted",
+            "accessibility_enabled",
+            "battery_optimization_disabled",
             "synced_at",
         ]
         read_only_fields = ["id", "child", "synced_at"]
@@ -186,6 +193,13 @@ class DeviceStatsSyncSerializer(serializers.Serializer):
     battery = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=100)
     charging = serializers.BooleanField(required=False)
     usage_access_granted = serializers.BooleanField(required=False, default=False)
+    location_service_enabled = serializers.BooleanField(required=False, default=False)
+    location_permission_granted = serializers.BooleanField(required=False, default=False)
+    background_location_granted = serializers.BooleanField(required=False, default=False)
+    microphone_granted = serializers.BooleanField(required=False, default=False)
+    notifications_granted = serializers.BooleanField(required=False, default=False)
+    accessibility_enabled = serializers.BooleanField(required=False, default=False)
+    battery_optimization_disabled = serializers.BooleanField(required=False, default=False)
     days = DeviceUsageDaySerializer(many=True, required=False)
 
 

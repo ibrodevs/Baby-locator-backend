@@ -116,6 +116,13 @@ class DeviceStatus(models.Model):
     battery = models.IntegerField(null=True, blank=True)
     charging = models.BooleanField(default=False)
     usage_access_granted = models.BooleanField(default=False)
+    location_service_enabled = models.BooleanField(default=False)
+    location_permission_granted = models.BooleanField(default=False)
+    background_location_granted = models.BooleanField(default=False)
+    microphone_granted = models.BooleanField(default=False)
+    notifications_granted = models.BooleanField(default=False)
+    accessibility_enabled = models.BooleanField(default=False)
+    battery_optimization_disabled = models.BooleanField(default=False)
     synced_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

@@ -497,6 +497,13 @@ class ChildDeviceStatsSyncView(APIView):
             "battery",
             "charging",
             "usage_access_granted",
+            "location_service_enabled",
+            "location_permission_granted",
+            "background_location_granted",
+            "microphone_granted",
+            "notifications_granted",
+            "accessibility_enabled",
+            "battery_optimization_disabled",
         ]:
             if field in data:
                 setattr(device_status, field, data[field])
@@ -788,6 +795,13 @@ class ChildStatsSummaryView(APIView):
                     "os_version": device_status.os_version if device_status else "",
                     "timezone": device_status.timezone if device_status else "",
                     "usage_access_granted": device_status.usage_access_granted if device_status else False,
+                    "location_service_enabled": device_status.location_service_enabled if device_status else False,
+                    "location_permission_granted": device_status.location_permission_granted if device_status else False,
+                    "background_location_granted": device_status.background_location_granted if device_status else False,
+                    "microphone_granted": device_status.microphone_granted if device_status else False,
+                    "notifications_granted": device_status.notifications_granted if device_status else False,
+                    "accessibility_enabled": device_status.accessibility_enabled if device_status else False,
+                    "battery_optimization_disabled": device_status.battery_optimization_disabled if device_status else False,
                     "charging": device_status.charging if device_status else False,
                     "battery": (
                         latest_location.battery
