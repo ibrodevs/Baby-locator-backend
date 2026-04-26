@@ -88,6 +88,38 @@ def send_notification_push(fcm_token: str, notification_type: str, title: str, b
         if extra_data:
             data.update({k: str(v) for k, v in extra_data.items() if v is not None})
 
+        if notification_type == "sos":
+            # Android must receive SOS as a data-first push so the background
+            # handler can raise a local full-screen intent notification even
+            # when the app is backgrounded or terminated. iOS still gets a
+            # visible APNS alert via the platform-specific payload below.
+            message = messaging.Message(
+                data=data,
+                token=fcm_token,
+                android=messaging.AndroidConfig(
+                    priority="high",
+                ),
+                apns=messaging.APNSConfig(
+                    headers={
+                        "apns-priority": "10",
+                        "apns-push-type": "alert",
+                    },
+                    payload=messaging.APNSPayload(
+                        aps=messaging.Aps(
+                            alert=messaging.ApsAlert(
+                                title=title,
+                                body=body,
+                            ),
+                            sound="default",
+                            content_available=True,
+                        ),
+                    ),
+                ),
+            )
+            response = messaging.send(message)
+            logger.info("FCM notification %s push sent: %s", notification_type, response)
+            return
+
         message = messaging.Message(
             data=data,
             notification=messaging.Notification(
