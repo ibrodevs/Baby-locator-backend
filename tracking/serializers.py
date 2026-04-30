@@ -175,6 +175,7 @@ class AppUsageSyncItemSerializer(serializers.Serializer):
     app_name = serializers.CharField(required=False, allow_blank=True, default="")
     usage_minutes = serializers.IntegerField(min_value=0)
     last_used_at = serializers.DateTimeField(required=False, allow_null=True)
+    icon_b64 = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
 class DeviceUsageDaySerializer(serializers.Serializer):

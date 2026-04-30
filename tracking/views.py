@@ -23,6 +23,7 @@ from accounts.serializers import UserSerializer
 from .live_audio import live_audio_broker
 from .models import (
     Alert,
+    AppIcon,
     AppLimit,
     AppUsageSnapshot,
     AroundAudioClip,
@@ -521,10 +522,14 @@ class ChildDeviceStatsSyncView(APIView):
 
         summaries = []
         snapshots = []
+        icon_updates = {}
         for day in days:
             raw_apps = day.get("apps", [])
             apps = []
             for app in raw_apps:
+                icon_b64 = app.get("icon_b64")
+                if icon_b64:
+                    icon_updates[app["package_name"]] = icon_b64
                 apps.append({
                     **app,
                     "usage_minutes": min(
@@ -576,6 +581,12 @@ class ChildDeviceStatsSyncView(APIView):
             DeviceDailySummary.objects.bulk_create(summaries)
             if snapshots:
                 AppUsageSnapshot.objects.bulk_create(snapshots)
+            for package_name, icon_b64 in icon_updates.items():
+                AppIcon.objects.update_or_create(
+                    child=request.user,
+                    package_name=package_name,
+                    defaults={"icon_b64": icon_b64},
+                )
 
         # Auto-block apps that exceed their enabled daily limits
         today_str = timezone.localdate()
@@ -650,6 +661,10 @@ class ChildStatsSummaryView(APIView):
         device_status = getattr(child, "device_status", None)
         limits = list(child.app_limits.all())
         limits_by_package = {limit.package_name: limit for limit in limits}
+        icons_by_package = {
+            icon.package_name: icon.icon_b64
+            for icon in child.app_icons.all()
+        }
 
         month_summaries = {
             summary.usage_date: summary
@@ -758,6 +773,11 @@ class ChildStatsSummaryView(APIView):
             )
             day_cursor += timedelta(days=1)
 
+        for item in selected_apps.values():
+            icon = icons_by_package.get(item["package_name"])
+            if icon:
+                item["icon_b64"] = icon
+
         apps = sorted(
             selected_apps.values(),
             key=lambda item: (-item["usage_minutes"], item["app_name"].lower()),
@@ -775,6 +795,7 @@ class ChildStatsSummaryView(APIView):
                 {
                     "package_name": s["package_name"],
                     "app_name": s["app_name"],
+                    "icon_b64": icons_by_package.get(s["package_name"]),
                 }
                 for s in all_snapshots
                 if s["package_name"] not in known_packages_in_apps
