@@ -1180,6 +1180,8 @@ class AroundAudioLiveStreamView(APIView):
             content_type="application/octet-stream",
         )
         response["Cache-Control"] = "no-store"
+        response["X-Accel-Buffering"] = "no"
+        response["Content-Encoding"] = "identity"
         response["X-Audio-Sample-Rate"] = str(session.sample_rate)
         response["X-Audio-Channels"] = str(session.channels)
         response["X-Audio-Format"] = session.format
