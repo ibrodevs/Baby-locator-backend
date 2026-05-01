@@ -96,8 +96,39 @@ gunicorn config.wsgi:application \
     --access-logfile -
 ```
 
-`--timeout 0` is important — otherwise gunicorn kills any worker that's been
-"busy" (i.e. streaming PCM) for >30s.
+`--timeout 0` is **mandatory**. Otherwise gunicorn kills the worker after
+30s of "no progress" (which is exactly what a streaming upload looks like
+to gunicorn's heuristic) and you get either 504 on the parent or the child
+upload silently aborts mid-stream. The classic symptom is "ждал 2–3 минуты
+и вышло 504" — that's gunicorn killing the upload worker, not nginx.
+
+## 2.1 Sanity check
+
+After applying the config and restarting, from the server itself run:
+
+```bash
+# 1. Verify nginx is forwarding chunked POST without buffering.
+curl -v -N -X POST \
+    -H 'Authorization: Token <child_token>' \
+    -H 'Transfer-Encoding: chunked' \
+    --data-binary @- \
+    "http://127.0.0.1/api/around-audio/live/upload/?session_token=test123" \
+    < /dev/zero
+
+# Within ~1s gunicorn's access log should show the request landing
+# (not waiting for the upload to finish). If it only shows up after
+# Ctrl+C, request buffering is still on.
+```
+
+```bash
+# 2. Verify the parent stream flushes immediately.
+curl -v -N \
+    -H 'Authorization: Token <parent_token>' \
+    "http://127.0.0.1/api/children/<child_id>/around-audio/live/stream/?session_token=test123"
+
+# You should see the silence keep-alive frame land within ~1s and then
+# every 5s. If nothing arrives for 60s, response buffering is still on.
+```
 
 ## 3. Django env
 

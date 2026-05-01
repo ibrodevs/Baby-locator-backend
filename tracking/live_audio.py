@@ -1,7 +1,16 @@
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque
+
+# 5s of 16kHz mono s16le silence is 160000 bytes — too large to flush
+# constantly. We send a small frame (~40ms) every keepalive tick instead so
+# the player has something to consume and intermediaries (nginx, mobile NATs)
+# see a steady byte trickle that resets their idle timers.
+_KEEPALIVE_INTERVAL_SECONDS = 5.0
+_KEEPALIVE_FRAME_BYTES = 16000 * 2 // 25  # 40 ms of 16 kHz s16le silence
+_KEEPALIVE_FRAME = b"\x00" * _KEEPALIVE_FRAME_BYTES
 
 
 @dataclass
@@ -94,25 +103,39 @@ class LiveAudioBroker:
     def iter_chunks(self, session_token: str, *, child_id: int):
         session = self.get_or_create(session_token, child_id=child_id)
         next_index = session.first_index
+        last_emit = time.monotonic()
+
+        # Prime the response so the WSGI server flushes headers immediately —
+        # otherwise nginx may sit waiting for the first byte and 504 the
+        # parent before the child's upload pipeline has started.
+        yield _KEEPALIVE_FRAME
 
         while True:
             with session.condition:
-                while True:
-                    if next_index < session.first_index:
-                        next_index = session.first_index
+                if next_index < session.first_index:
+                    next_index = session.first_index
 
-                    available = [chunk for chunk in session.chunks if chunk.index >= next_index]
-                    if available:
-                        break
+                available = [chunk for chunk in session.chunks if chunk.index >= next_index]
+                if not available:
                     if session.closed:
                         return
-                    session.condition.wait(timeout=15)
+                    session.condition.wait(timeout=_KEEPALIVE_INTERVAL_SECONDS)
                     if session.closed and next_index >= session.next_index:
                         return
+                    available = [chunk for chunk in session.chunks if chunk.index >= next_index]
 
                 for chunk in available:
                     next_index = chunk.index + 1
+
+            if available:
+                for chunk in available:
                     yield chunk.data
+                last_emit = time.monotonic()
+            elif time.monotonic() - last_emit >= _KEEPALIVE_INTERVAL_SECONDS:
+                # No real audio yet — emit silence so the connection (and the
+                # parent's audio sink) stays warm while the child wakes up.
+                yield _KEEPALIVE_FRAME
+                last_emit = time.monotonic()
 
     def get_session(self, session_token: str) -> LiveAudioSessionState | None:
         with self._lock:
