@@ -4,13 +4,17 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque
 
-# 5s of 16kHz mono s16le silence is 160000 bytes — too large to flush
-# constantly. We send a small frame (~40ms) every keepalive tick instead so
-# the player has something to consume and intermediaries (nginx, mobile NATs)
-# see a steady byte trickle that resets their idle timers.
-_KEEPALIVE_INTERVAL_SECONDS = 5.0
-_KEEPALIVE_FRAME_BYTES = 16000 * 2 // 25  # 40 ms of 16 kHz s16le silence
+# Keep-alive cadence on the parent's download stream while no real audio
+# is queued yet. The frame is deliberately large enough (8 KB ≈ 250 ms of
+# 16 kHz s16le silence) to push past common nginx / wsgi output buffers,
+# so the parent's HTTP client gets bytes immediately instead of sitting
+# on `awaiting first byte` while data accumulates in an upstream buffer.
+_KEEPALIVE_INTERVAL_SECONDS = 1.0
+_KEEPALIVE_FRAME_BYTES = 16000 * 2 // 4  # 250 ms of 16 kHz s16le silence
 _KEEPALIVE_FRAME = b"\x00" * _KEEPALIVE_FRAME_BYTES
+# Primer is bigger still so even a 16 KB proxy buffer flushes immediately
+# when the parent connects. Plays as ~0.5 s of silence — imperceptible.
+_PRIMER_FRAME = b"\x00" * (16 * 1024)
 
 
 @dataclass
@@ -105,10 +109,11 @@ class LiveAudioBroker:
         next_index = session.first_index
         last_emit = time.monotonic()
 
-        # Prime the response so the WSGI server flushes headers immediately —
-        # otherwise nginx may sit waiting for the first byte and 504 the
-        # parent before the child's upload pipeline has started.
-        yield _KEEPALIVE_FRAME
+        # Prime the response so the WSGI server flushes headers and the
+        # first body bytes immediately — otherwise nginx / uwsgi may sit
+        # waiting on a partial 8/16 KB buffer and 504 the parent before
+        # the child's upload pipeline has started.
+        yield _PRIMER_FRAME
 
         while True:
             with session.condition:

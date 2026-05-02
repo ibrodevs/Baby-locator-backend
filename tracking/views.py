@@ -1109,30 +1109,29 @@ class AroundAudioLiveUploadView(APIView):
             channels=channels,
             audio_format=LIVE_AUDIO_FORMAT,
         )
-        chunk_count = 0
-        byte_count = 0
-
-        try:
-            stream = request.META["wsgi.input"]
-            while True:
-                chunk = stream.read(4096)
-                if not chunk:
-                    break
-                chunk_count += 1
-                byte_count += len(chunk)
-                live_audio_broker.publish(
-                    session_token,
-                    child_id=request.user.id,
-                    data=chunk,
-                )
-        finally:
-            live_audio_broker.finish(session_token, child_id=request.user.id)
+        # Read the entire request body and publish it as a single broker
+        # frame. The native child uploader sends ~250 ms batches as short
+        # POSTs (typical body 8 KB), so this completes immediately.
+        # Reading wsgi.input incrementally inside a request is unreliable
+        # behind reverse proxies that buffer the body — the previous long
+        # streaming-POST design got buffered to death and never delivered
+        # bytes in real time.
+        body = request.body
+        byte_count = len(body)
+        if byte_count > 0:
+            live_audio_broker.publish(
+                session_token,
+                child_id=request.user.id,
+                data=bytes(body),
+            )
+        # Do NOT call broker.finish() — the session stays open across many
+        # short POSTs. The broker session is closed only when the parent's
+        # download disconnects, the child stops, or the broker is GC'd.
 
         logger.info(
-            "Around live audio upload finished: child_id=%s session=%s chunks=%s bytes=%s rate=%s channels=%s",
+            "Around live audio batch: child_id=%s session=%s bytes=%s rate=%s channels=%s",
             request.user.id,
             session_token,
-            chunk_count,
             byte_count,
             session.sample_rate,
             session.channels,
@@ -1145,7 +1144,6 @@ class AroundAudioLiveUploadView(APIView):
                 "channels": session.channels,
                 "format": session.format,
                 "bytes_received": byte_count,
-                "chunks_received": chunk_count,
             }
         )
 
