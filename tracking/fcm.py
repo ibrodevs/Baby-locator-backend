@@ -7,6 +7,13 @@ logger = logging.getLogger(__name__)
 
 _firebase_initialized = False
 
+_TIME_SENSITIVE_NOTIFICATION_TYPES = {
+    "sos",
+    "battery_low",
+    "safe_zone_exit",
+    "location_update",
+}
+
 
 def _ensure_firebase():
     global _firebase_initialized
@@ -28,6 +35,32 @@ def _ensure_firebase():
     except Exception as e:
         logger.error("Failed to initialize Firebase: %s", e)
         return False
+
+
+def _apns_headers(push_type: str = "alert", priority: str = "10"):
+    return {
+        "apns-priority": priority,
+        "apns-push-type": push_type,
+        "apns-expiration": "0",
+    }
+
+
+def _apns_aps_payload(messaging, *, notification_type: str, title: str, body: str):
+    custom_data = {}
+    if notification_type in _TIME_SENSITIVE_NOTIFICATION_TYPES:
+        custom_data["interruption-level"] = "time-sensitive"
+
+    return messaging.Aps(
+        alert=messaging.ApsAlert(
+            title=title,
+            body=body,
+        ),
+        sound="default",
+        content_available=True,
+        mutable_content=True,
+        thread_id=f"family-security-{notification_type}",
+        custom_data=custom_data or None,
+    )
 
 
 def send_command_push(fcm_token: str, command_type: str, extra_data=None):
@@ -52,10 +85,7 @@ def send_command_push(fcm_token: str, command_type: str, extra_data=None):
                 priority="high",
             ),
             apns=messaging.APNSConfig(
-                headers={
-                    "apns-priority": "5",
-                    "apns-push-type": "background",
-                },
+                headers=_apns_headers(push_type="background", priority="5"),
                 payload=messaging.APNSPayload(
                     aps=messaging.Aps(
                         content_available=True,
@@ -100,18 +130,13 @@ def send_notification_push(fcm_token: str, notification_type: str, title: str, b
                     priority="high",
                 ),
                 apns=messaging.APNSConfig(
-                    headers={
-                        "apns-priority": "10",
-                        "apns-push-type": "alert",
-                    },
+                    headers=_apns_headers(),
                     payload=messaging.APNSPayload(
-                        aps=messaging.Aps(
-                            alert=messaging.ApsAlert(
-                                title=title,
-                                body=body,
-                            ),
-                            sound="default",
-                            content_available=True,
+                        aps=_apns_aps_payload(
+                            messaging,
+                            notification_type=notification_type,
+                            title=title,
+                            body=body,
                         ),
                     ),
                 ),
@@ -135,17 +160,13 @@ def send_notification_push(fcm_token: str, notification_type: str, title: str, b
                 ),
             ),
             apns=messaging.APNSConfig(
-                headers={
-                    "apns-priority": "10",
-                    "apns-push-type": "alert",
-                },
+                headers=_apns_headers(),
                 payload=messaging.APNSPayload(
-                    aps=messaging.Aps(
-                        alert=messaging.ApsAlert(
-                            title=title,
-                            body=body,
-                        ),
-                        sound="default",
+                    aps=_apns_aps_payload(
+                        messaging,
+                        notification_type=notification_type,
+                        title=title,
+                        body=body,
                     ),
                 ),
             ),

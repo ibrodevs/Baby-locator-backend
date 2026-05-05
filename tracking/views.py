@@ -152,6 +152,8 @@ class SafeZoneViewSet(viewsets.ModelViewSet):
 class ShareLocationView(APIView):
     """Child posts their current location."""
 
+    MOVEMENT_ALERT_MIN_DISTANCE_METERS = 200
+    MOVEMENT_ALERT_COOLDOWN = timedelta(minutes=10)
     BATTERY_LOW_THRESHOLD = 20
     # Suppress duplicate battery_low alerts for 30 minutes.
     BATTERY_ALERT_COOLDOWN = timedelta(minutes=30)
@@ -177,10 +179,69 @@ class ShareLocationView(APIView):
         # --- Generate alerts for the parent ---
         parent = request.user.parent
         if parent:
+            self._check_location_alert(request.user, parent, loc)
             self._check_battery_alert(request.user, parent, loc)
             self._check_zone_exit_alert(request.user, parent, loc)
 
         return Response(LocationSerializer(loc).data, status=201)
+
+    def _create_parent_alert_and_push(self, *, child, parent, alert_type, title, message):
+        alert = Alert.objects.create(
+            child=child,
+            parent=parent,
+            alert_type=alert_type,
+            title=title,
+            message=message,
+        )
+        if parent.fcm_token:
+            send_notification_push(
+                parent.fcm_token,
+                notification_type=alert_type,
+                title=title,
+                body=message,
+                extra_data={
+                    "child_id": child.id,
+                    "child_name": child.display_name or child.username,
+                    "alert_id": alert.id,
+                },
+            )
+        return alert
+
+    def _check_location_alert(self, child, parent, loc):
+        if not loc.active:
+            return
+
+        prev_loc = (
+            child.locations.filter(created_at__lt=loc.created_at)
+            .order_by("-created_at")
+            .first()
+        )
+        if prev_loc is None:
+            return
+
+        distance_m = _haversine_m(prev_loc.lat, prev_loc.lng, loc.lat, loc.lng)
+        if distance_m < self.MOVEMENT_ALERT_MIN_DISTANCE_METERS:
+            return
+
+        cutoff = timezone.now() - self.MOVEMENT_ALERT_COOLDOWN
+        already = Alert.objects.filter(
+            child=child,
+            parent=parent,
+            alert_type=Alert.TYPE_LOCATION_UPDATE,
+            created_at__gte=cutoff,
+        ).exists()
+        if already:
+            return
+
+        child_name = child.display_name or child.username
+        place = loc.address or f"{loc.lat:.5f}, {loc.lng:.5f}"
+        self._create_parent_alert_and_push(
+            child=child,
+            parent=parent,
+            alert_type=Alert.TYPE_LOCATION_UPDATE,
+            title=f"{child_name}: обновление местоположения",
+            message=f"Ребёнок переместился и сейчас находится рядом: {place}",
+        )
 
     def _check_battery_alert(self, child, parent, loc):
         if loc.battery is None or loc.battery > self.BATTERY_LOW_THRESHOLD:
@@ -195,7 +256,7 @@ class ShareLocationView(APIView):
         if already:
             return
         child_name = child.display_name or child.username
-        Alert.objects.create(
+        self._create_parent_alert_and_push(
             child=child,
             parent=parent,
             alert_type=Alert.TYPE_BATTERY_LOW,
@@ -236,7 +297,7 @@ class ShareLocationView(APIView):
         if already:
             return
         child_name = child.display_name or child.username
-        Alert.objects.create(
+        self._create_parent_alert_and_push(
             child=child,
             parent=parent,
             alert_type=Alert.TYPE_SAFE_ZONE_EXIT,

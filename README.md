@@ -1,4 +1,4 @@
-# Kid Security — Django REST backend
+# Family security — Django REST backend
 
 ## Setup
 

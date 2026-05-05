@@ -355,7 +355,7 @@ def invite_landing(request, code):
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kid Security — Приглашение</title>
+<title>Family security — Приглашение</title>
 <style>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -380,13 +380,13 @@ def invite_landing(request, code):
 <div class="card">
   <div class="icon">&#x1F46A;</div>
   <h1>Вас приглашают!</h1>
-  <p class="sub"><span class="parent">{parent_name}</span> подготовил подключение{f' для {child_name}' if child_name else ''} в Kid Security</p>
+  <p class="sub"><span class="parent">{parent_name}</span> подготовил подключение{f' для {child_name}' if child_name else ''} в Family security</p>
   <div class="code-box">
     <div class="code">{invite.code}</div>
     <div class="label">Код для входа ребёнка</div>
   </div>
   <ol class="steps">
-    <li>Скачайте приложение <b>Kid Security</b></li>
+    <li>Скачайте приложение <b>Family security</b></li>
     <li>Откройте приложение</li>
     <li>Введите код выше на первом экране</li>
   </ol>
@@ -399,7 +399,7 @@ def invite_landing(request, code):
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kid Security — Приглашение</title>
+<title>Family security — Приглашение</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

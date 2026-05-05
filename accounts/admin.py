@@ -9,5 +9,5 @@ class CustomUserAdmin(UserAdmin):
     list_display = ("username", "role", "display_name", "parent", "is_staff")
     list_filter = ("role",)
     fieldsets = UserAdmin.fieldsets + (
-        ("Kid Security", {"fields": ("role", "display_name", "parent")}),
+        ("Family security", {"fields": ("role", "display_name", "parent")}),
     )

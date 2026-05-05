@@ -290,12 +290,14 @@ class RemoteDeviceCommand(models.Model):
 class Alert(models.Model):
     """Persistent server-side alert for parent notification."""
 
+    TYPE_LOCATION_UPDATE = "location_update"
     TYPE_BATTERY_LOW = "battery_low"
     TYPE_SAFE_ZONE_EXIT = "safe_zone_exit"
     TYPE_SOS = "sos"
     TYPE_CHAT_MESSAGE = "chat_message"
     TYPE_TASK_ASSIGNED = "task_assigned"
     TYPE_CHOICES = [
+        (TYPE_LOCATION_UPDATE, "Location Update"),
         (TYPE_BATTERY_LOW, "Battery Low"),
         (TYPE_SAFE_ZONE_EXIT, "Safe Zone Exit"),
         (TYPE_SOS, "SOS"),
