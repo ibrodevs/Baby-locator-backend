@@ -1,11 +1,16 @@
+import base64
 import calendar
+import hashlib
+import hmac
 import logging
 import math
 import mimetypes
 import re
+import time
 from datetime import date as dt_date
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import transaction
 from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
@@ -1454,6 +1459,54 @@ class MonitorSignalPollView(APIView):
                 for m in messages
             ],
         })
+
+
+class IceServersView(APIView):
+    """
+    Hand the WebRTC ICE configuration to authenticated clients.
+
+    STUN-only is fine on Wi-Fi but fails on the symmetric NATs most cellular
+    carriers use, so a TURN relay is required for "Звук вокруг" to work over
+    mobile data. Credentials live on the server (see settings.WEBRTC_TURN_*)
+    so they can be rotated without shipping a new app build.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        ice_servers = [
+            {"urls": url} for url in settings.WEBRTC_STUN_URLS
+        ]
+
+        turn_urls = list(settings.WEBRTC_TURN_URLS or [])
+        if turn_urls:
+            secret = settings.WEBRTC_TURN_SECRET
+            if secret:
+                # coturn `use-auth-secret` mode: username is "<expiry>:<user>"
+                # and credential is base64(HMAC-SHA1(username, secret)). The
+                # creds are valid only for TTL seconds, so even if a phone is
+                # compromised the attacker can't permanently hijack the relay.
+                ttl = max(60, int(settings.WEBRTC_TURN_TTL_SECONDS or 86400))
+                expiry = int(time.time()) + ttl
+                user_id = request.user.id
+                username = f"{expiry}:{user_id}"
+                digest = hmac.new(
+                    secret.encode("utf-8"),
+                    username.encode("utf-8"),
+                    hashlib.sha1,
+                ).digest()
+                credential = base64.b64encode(digest).decode("ascii")
+            else:
+                username = settings.WEBRTC_TURN_USERNAME or ""
+                credential = settings.WEBRTC_TURN_CREDENTIAL or ""
+
+            if username and credential:
+                ice_servers.append({
+                    "urls": turn_urls if len(turn_urls) > 1 else turn_urls[0],
+                    "username": username,
+                    "credential": credential,
+                })
+
+        return Response({"iceServers": ice_servers})
 
 
 class SosView(APIView):

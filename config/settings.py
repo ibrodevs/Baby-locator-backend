@@ -124,3 +124,24 @@ FIREBASE_SERVICE_ACCOUNT_KEY = os.getenv(
     "FIREBASE_SERVICE_ACCOUNT_KEY",
     str(BASE_DIR / "firebase-service-account.json"),
 )
+
+# WebRTC ICE servers handed to parent + child clients via the
+# /api/webrtc/ice-servers/ endpoint. STUN only by default (works on Wi-Fi,
+# fails on most cellular NATs). Set the TURN_* envs to enable a TURN relay so
+# parents can hear ambient audio over mobile data when the child phone is
+# behind a symmetric NAT.
+#
+# Two TURN auth modes are supported:
+#   1) Static creds — set WEBRTC_TURN_USERNAME + WEBRTC_TURN_CREDENTIAL.
+#   2) coturn shared-secret (use-auth-secret) — set WEBRTC_TURN_SECRET. Each
+#      client request gets a fresh HMAC-signed time-limited credential, so
+#      no long-lived TURN password is ever shipped to the device.
+WEBRTC_STUN_URLS = env_list("WEBRTC_STUN_URLS", [
+    "stun:stun.l.google.com:19302",
+    "stun:stun1.l.google.com:19302",
+])
+WEBRTC_TURN_URLS = env_list("WEBRTC_TURN_URLS", [])
+WEBRTC_TURN_USERNAME = os.getenv("WEBRTC_TURN_USERNAME", "")
+WEBRTC_TURN_CREDENTIAL = os.getenv("WEBRTC_TURN_CREDENTIAL", "")
+WEBRTC_TURN_SECRET = os.getenv("WEBRTC_TURN_SECRET", "")
+WEBRTC_TURN_TTL_SECONDS = int(os.getenv("WEBRTC_TURN_TTL_SECONDS", "86400"))
