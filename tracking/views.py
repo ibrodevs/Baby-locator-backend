@@ -162,6 +162,8 @@ class ShareLocationView(APIView):
     BATTERY_LOW_THRESHOLD = 20
     # Suppress duplicate battery_low alerts for 30 minutes.
     BATTERY_ALERT_COOLDOWN = timedelta(minutes=30)
+    # Suppress duplicate safe zone enter alerts for 10 minutes per zone.
+    ZONE_ENTER_COOLDOWN = timedelta(minutes=10)
     # Suppress duplicate safe zone exit alerts for 10 minutes per zone.
     ZONE_EXIT_COOLDOWN = timedelta(minutes=10)
 
@@ -186,7 +188,7 @@ class ShareLocationView(APIView):
         if parent:
             self._check_location_alert(request.user, parent, loc)
             self._check_battery_alert(request.user, parent, loc)
-            self._check_zone_exit_alert(request.user, parent, loc)
+            self._check_zone_transition_alerts(request.user, parent, loc)
 
         return Response(LocationSerializer(loc).data, status=201)
 
@@ -269,16 +271,30 @@ class ShareLocationView(APIView):
             message=f"Уровень заряда {loc.battery}%",
         )
 
-    def _check_zone_exit_alert(self, child, parent, loc):
+    def _has_recent_zone_alert(
+        self,
+        *,
+        child,
+        parent,
+        alert_type,
+        zone_name,
+        cooldown,
+    ):
+        cutoff = timezone.now() - cooldown
+        return Alert.objects.filter(
+            child=child,
+            parent=parent,
+            alert_type=alert_type,
+            message__contains=zone_name,
+            created_at__gte=cutoff,
+        ).exists()
+
+    def _check_zone_transition_alerts(self, child, parent, loc):
         zones = list(SafeZone.objects.filter(parent=parent, active=True))
         if not zones:
             return
-        # Check if child is currently inside any zone
-        current_zone = _match_zone_for_location(zones, loc)
-        if current_zone is not None:
-            return  # Still inside a zone, no alert needed.
 
-        # Check previous location to see if they WERE in a zone
+        current_zone = _match_zone_for_location(zones, loc)
         prev_loc = (
             child.locations.filter(created_at__lt=loc.created_at)
             .order_by("-created_at")
@@ -286,29 +302,43 @@ class ShareLocationView(APIView):
         )
         if prev_loc is None:
             return
-        prev_zone = _match_zone_for_location(zones, prev_loc)
-        if prev_zone is None:
-            return  # Was not in a zone before either
 
-        # Child just left prev_zone — check cooldown
-        cutoff = timezone.now() - self.ZONE_EXIT_COOLDOWN
-        already = Alert.objects.filter(
-            child=child,
-            parent=parent,
-            alert_type=Alert.TYPE_SAFE_ZONE_EXIT,
-            message__contains=prev_zone.name,
-            created_at__gte=cutoff,
-        ).exists()
-        if already:
-            return
+        prev_zone = _match_zone_for_location(zones, prev_loc)
         child_name = child.display_name or child.username
-        self._create_parent_alert_and_push(
-            child=child,
-            parent=parent,
-            alert_type=Alert.TYPE_SAFE_ZONE_EXIT,
-            title=f"{child_name}: вышел из безопасной зоны",
-            message=f"Покинул зону «{prev_zone.name}»",
-        )
+
+        if prev_zone != current_zone and prev_zone is not None:
+            already_exited = self._has_recent_zone_alert(
+                child=child,
+                parent=parent,
+                alert_type=Alert.TYPE_SAFE_ZONE_EXIT,
+                zone_name=prev_zone.name,
+                cooldown=self.ZONE_EXIT_COOLDOWN,
+            )
+            if not already_exited:
+                self._create_parent_alert_and_push(
+                    child=child,
+                    parent=parent,
+                    alert_type=Alert.TYPE_SAFE_ZONE_EXIT,
+                    title=f"{child_name}: вышел из безопасной зоны",
+                    message=f"Покинул зону «{prev_zone.name}»",
+                )
+
+        if prev_zone != current_zone and current_zone is not None:
+            already_entered = self._has_recent_zone_alert(
+                child=child,
+                parent=parent,
+                alert_type=Alert.TYPE_SAFE_ZONE_ENTER,
+                zone_name=current_zone.name,
+                cooldown=self.ZONE_ENTER_COOLDOWN,
+            )
+            if not already_entered:
+                self._create_parent_alert_and_push(
+                    child=child,
+                    parent=parent,
+                    alert_type=Alert.TYPE_SAFE_ZONE_ENTER,
+                    title=f"{child_name}: вошёл в безопасную зону",
+                    message=f"Прибыл в место «{current_zone.name}»",
+                )
 
 
 class ChildLatestLocationView(APIView):

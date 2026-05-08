@@ -10,6 +10,7 @@ _firebase_initialized = False
 _TIME_SENSITIVE_NOTIFICATION_TYPES = {
     "sos",
     "battery_low",
+    "safe_zone_enter",
     "safe_zone_exit",
     "location_update",
 }
