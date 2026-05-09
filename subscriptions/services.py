@@ -131,7 +131,10 @@ def _apply_event_to_user(user, event):
 
 
 def _event_grants_premium(event, *, product_id, expires_at):
-    if product_id in set(settings.REVENUECAT_LIFETIME_PRODUCT_IDS or []):
+    if _product_matches_configured_ids(
+        product_id,
+        settings.REVENUECAT_LIFETIME_PRODUCT_IDS or [],
+    ):
         return True
 
     if expires_at is not None:
@@ -151,7 +154,10 @@ def _event_targets_family_security(event):
         return True
 
     product_id = _event_product_id(event)
-    return product_id in set(settings.REVENUECAT_PREMIUM_PRODUCT_IDS or [])
+    return _product_matches_configured_ids(
+        product_id,
+        settings.REVENUECAT_PREMIUM_PRODUCT_IDS or [],
+    )
 
 
 def _event_entitlement_ids(event):
@@ -166,6 +172,27 @@ def _event_product_id(event):
         event.get("product_id"),
         event.get("new_product_id"),
     )
+
+
+def _product_matches_configured_ids(product_id, configured_ids):
+    product_aliases = _product_id_aliases(product_id)
+    if not product_aliases:
+        return False
+
+    for configured_id in configured_ids:
+        if product_aliases & _product_id_aliases(configured_id):
+            return True
+    return False
+
+
+def _product_id_aliases(product_id):
+    raw = str(product_id or "").strip()
+    if not raw:
+        return set()
+
+    aliases = {raw}
+    aliases.update(part.strip() for part in raw.split(":") if part.strip())
+    return aliases
 
 
 def _resolve_backend_user_id(event):
