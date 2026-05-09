@@ -1,7 +1,7 @@
 import hmac
 import logging
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
 
 from django.conf import settings
 from django.db import transaction
@@ -201,7 +201,7 @@ def _millis_to_datetime(value):
         timestamp = int(value) / 1000
     except (TypeError, ValueError):
         return None
-    return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    return datetime.fromtimestamp(timestamp, tz=dt_timezone.utc)
 
 
 def _first_non_empty_string(*values):

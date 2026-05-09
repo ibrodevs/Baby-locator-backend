@@ -382,7 +382,10 @@ class AllChildrenLocationsView(APIView):
     def get(self, request):
         if request.user.role != User.ROLE_PARENT:
             return Response({"detail": "parents only"}, status=403)
-        if not has_premium_access(request.user):
+        if (
+            not has_premium_access(request.user)
+            and request.user.children.count() > 1
+        ):
             return premium_required_response()
 
         children = request.user.children.all().order_by("id")
