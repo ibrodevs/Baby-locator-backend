@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "corsheaders",
     "accounts",
+    "subscriptions",
     "tracking",
     "chat",
 ]
@@ -145,3 +146,24 @@ WEBRTC_TURN_USERNAME = os.getenv("WEBRTC_TURN_USERNAME", "")
 WEBRTC_TURN_CREDENTIAL = os.getenv("WEBRTC_TURN_CREDENTIAL", "")
 WEBRTC_TURN_SECRET = os.getenv("WEBRTC_TURN_SECRET", "")
 WEBRTC_TURN_TTL_SECONDS = int(os.getenv("WEBRTC_TURN_TTL_SECONDS", "86400"))
+
+# RevenueCat
+REVENUECAT_ENTITLEMENT_ID = os.getenv(
+    "REVENUECAT_ENTITLEMENT_ID",
+    "family_security_pro",
+)
+REVENUECAT_PREMIUM_PRODUCT_IDS = env_list(
+    "REVENUECAT_PREMIUM_PRODUCT_IDS",
+    ["monthly", "yearly", "lifetime"],
+)
+REVENUECAT_LIFETIME_PRODUCT_IDS = env_list(
+    "REVENUECAT_LIFETIME_PRODUCT_IDS",
+    ["lifetime"],
+)
+# RevenueCat webhooks support a configured Authorization header. Store the
+# full expected header value here, for example:
+#   Bearer super-secret-revenuecat-webhook-token
+REVENUECAT_WEBHOOK_AUTH_HEADER = os.getenv(
+    "REVENUECAT_WEBHOOK_AUTH_HEADER",
+    "",
+)

@@ -25,6 +25,10 @@ class UserSerializer(serializers.ModelSerializer):
             "has_joined",
             "active_invite_code",
             "invite_expires_at",
+            "is_premium",
+            "premium_entitlement",
+            "premium_product_id",
+            "premium_expires_at",
         ]
 
     def get_avatar_url(self, obj):

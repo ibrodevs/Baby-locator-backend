@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
+from subscriptions.services import has_premium_access, premium_required_response
 from tracking.fcm import send_notification_push
 from tracking.models import Alert
 
@@ -179,6 +180,8 @@ class TaskListView(APIView):
         child, parent = _validate_parent_child(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         tasks = Task.objects.filter(child=child)
         return Response(TaskSerializer(tasks, many=True).data)
@@ -190,6 +193,8 @@ class TaskListView(APIView):
         child, parent = _validate_parent_child(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         s = CreateTaskSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -243,6 +248,8 @@ class TaskActionView(APIView):
         child, parent = _validate_parent_child(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         task = get_object_or_404(Task, id=task_id, child=child)
 
@@ -271,6 +278,8 @@ class TaskActionView(APIView):
         child, parent = _validate_parent_child(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         task = get_object_or_404(Task, id=task_id, child=child)
         task.delete()
@@ -286,6 +295,8 @@ class StarsView(APIView):
         child, parent = _validate_parent_child(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         total = Task.objects.filter(
             child=child, status=Task.STATUS_APPROVED,
@@ -313,6 +324,8 @@ class RewardListView(APIView):
         child, parent = _validate_parent_child(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         rewards = Reward.objects.filter(child=child)
         return Response(RewardSerializer(rewards, many=True).data)
@@ -324,6 +337,8 @@ class RewardListView(APIView):
         child, parent = _validate_parent_child(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         s = CreateRewardSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -346,6 +361,8 @@ class RewardClaimView(APIView):
         child, parent = _validate_parent_child(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         reward = get_object_or_404(Reward, id=reward_id, child=child)
         if reward.claimed:
@@ -376,6 +393,8 @@ class RewardClaimView(APIView):
         child, parent = _validate_parent_child(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         reward = get_object_or_404(Reward, id=reward_id, child=child)
         reward.delete()
@@ -398,10 +417,13 @@ class ChildNotificationsView(APIView):
             status=Message.STATUS_SENT,
         ).order_by("-created_at")[:20]
 
-        pending_tasks = Task.objects.filter(
-            child=user,
-            status=Task.STATUS_PENDING,
-        ).order_by("-created_at")[:20]
+        if has_premium_access(user, child=user):
+            pending_tasks = Task.objects.filter(
+                child=user,
+                status=Task.STATUS_PENDING,
+            ).order_by("-created_at")[:20]
+        else:
+            pending_tasks = []
 
         notifications = []
 

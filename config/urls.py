@@ -8,6 +8,7 @@ from accounts.views import invite_landing
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/", include("accounts.urls")),
+    path("api/revenuecat/", include("subscriptions.urls")),
     path("api/", include("tracking.urls")),
     path("api/chat/", include("chat.urls")),
     path("invite/<str:code>/", invite_landing, name="invite-landing"),

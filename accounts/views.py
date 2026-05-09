@@ -10,6 +10,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from subscriptions.services import parent_can_add_child, premium_required_response
+
 from .models import InviteCode, User
 from .serializers import (
     CreateChildSerializer,
@@ -109,6 +111,8 @@ class ChildrenView(APIView):
     def post(self, request):
         if request.user.role != User.ROLE_PARENT:
             return Response({"detail": "parents only"}, status=403)
+        if not parent_can_add_child(request.user):
+            return premium_required_response()
         s = CreateChildSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         username = s.validated_data.get("username")

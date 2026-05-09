@@ -24,6 +24,7 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.serializers import UserSerializer
+from subscriptions.services import has_premium_access, premium_required_response
 
 from .live_audio import live_audio_broker
 from .models import (
@@ -348,6 +349,8 @@ class ChildLatestLocationView(APIView):
         child = _resolve_child_for_request(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
         loc = child.locations.first()
         if not loc:
             return Response({"detail": "no location yet"}, status=404)
@@ -367,6 +370,8 @@ class ChildLocationHistoryView(APIView):
         child = _resolve_child_for_request(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
         qs = child.locations.all()[:100]
         return Response(LocationSerializer(qs, many=True).data)
 
@@ -377,6 +382,8 @@ class AllChildrenLocationsView(APIView):
     def get(self, request):
         if request.user.role != User.ROLE_PARENT:
             return Response({"detail": "parents only"}, status=403)
+        if not has_premium_access(request.user):
+            return premium_required_response()
 
         children = request.user.children.all().order_by("id")
         result = []
@@ -412,6 +419,8 @@ class ChildActivityView(APIView):
         child = _resolve_child_for_request(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         # Get today's locations (oldest first for timeline derivation)
         today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -535,6 +544,8 @@ class ChildSafetyScoreView(APIView):
         child = _resolve_child_for_request(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         locations = list(child.locations.filter(created_at__gte=today))
@@ -736,6 +747,8 @@ class ChildStatsSummaryView(APIView):
         child = _resolve_child_for_request(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         today = timezone.localdate()
         selected_date = _parse_selected_date(
@@ -957,6 +970,8 @@ class ChildAppLimitView(APIView):
             role=User.ROLE_CHILD,
             parent=request.user,
         )
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
         serializer = AppLimitWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -1008,6 +1023,19 @@ class ChildDeviceCommandCreateView(APIView):
         serializer = RemoteDeviceCommandActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data.get("payload") or {}
+        protected_commands = {
+            RemoteDeviceCommand.TYPE_LOUD,
+            RemoteDeviceCommand.TYPE_LOUD_STOP,
+            RemoteDeviceCommand.TYPE_AROUND_START,
+            RemoteDeviceCommand.TYPE_AROUND_STOP,
+            RemoteDeviceCommand.TYPE_WEBRTC_MONITOR_START,
+            RemoteDeviceCommand.TYPE_WEBRTC_MONITOR_STOP,
+        }
+        if (
+            serializer.validated_data["command_type"] in protected_commands
+            and not has_premium_access(request.user, child=child)
+        ):
+            return premium_required_response()
 
         if serializer.validated_data["command_type"] == RemoteDeviceCommand.TYPE_AROUND_START:
             payload.setdefault("session_token", AroundAudioClip.new_session_token())
@@ -1138,6 +1166,8 @@ class LatestAroundAudioView(APIView):
         child = get_object_or_404(User, id=child_id, role=User.ROLE_CHILD)
         if not _ensure_parent_child_relationship(request.user, child):
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         session_token = (request.query_params.get("session_token") or "").strip()
         if not session_token:
@@ -1167,6 +1197,8 @@ class AroundAudioStreamView(APIView):
         child = clip.child
         if not _ensure_parent_child_relationship(request.user, child):
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
         if not clip.audio:
             return Response({"detail": "no audio"}, status=404)
         content_type, _ = mimetypes.guess_type(clip.audio.name)
@@ -1264,6 +1296,8 @@ class AroundAudioLiveStreamView(APIView):
         child = get_object_or_404(User, id=child_id, role=User.ROLE_CHILD)
         if not _ensure_parent_child_relationship(request.user, child):
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         session_token = (request.query_params.get("session_token") or "").strip()
         if not session_token:
@@ -1303,6 +1337,8 @@ class ActivateMonitoringView(APIView):
     def post(self, request):
         if request.user.role != User.ROLE_PARENT:
             return Response({"detail": "parents only"}, status=403)
+        if not has_premium_access(request.user):
+            return premium_required_response()
 
         child_id = request.data.get("child_id")
         if not child_id:
@@ -1354,6 +1390,8 @@ class DeactivateMonitoringView(APIView):
     def post(self, request):
         if request.user.role != User.ROLE_PARENT:
             return Response({"detail": "parents only"}, status=403)
+        if not has_premium_access(request.user):
+            return premium_required_response()
 
         session_token = (request.data.get("session_token") or "").strip()
         child_id = request.data.get("child_id")
@@ -1642,6 +1680,8 @@ class BlockedAppsView(APIView):
         child = _resolve_child_for_request(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
         apps = BlockedApp.objects.filter(child=child)
         return Response(BlockedAppSerializer(apps, many=True).data)
 
@@ -1651,6 +1691,8 @@ class BlockedAppsView(APIView):
         child = _resolve_child_for_request(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         s = BlockAppSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -1701,6 +1743,8 @@ class UnblockAppView(APIView):
         child = _resolve_child_for_request(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
+        if not has_premium_access(request.user, child=child):
+            return premium_required_response()
 
         blocked = get_object_or_404(BlockedApp, id=blocked_id, child=child)
         blocked.delete()

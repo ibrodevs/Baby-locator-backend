@@ -38,6 +38,11 @@ class User(AbstractUser):
         related_name="children",
     )
     fcm_token = models.CharField(max_length=255, blank=True, default="")
+    is_premium = models.BooleanField(default=False, db_index=True)
+    premium_entitlement = models.CharField(max_length=64, blank=True, default="")
+    premium_product_id = models.CharField(max_length=128, blank=True, default="")
+    premium_expires_at = models.DateTimeField(null=True, blank=True)
+    premium_updated_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.username} ({self.role})"
