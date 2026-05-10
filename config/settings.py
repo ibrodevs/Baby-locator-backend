@@ -78,6 +78,8 @@ DATABASES = {
     }
 }
 
+print("DB PASSWORD:", os.getenv("DJANGO_DB_PASSWORD"))
+
 AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
