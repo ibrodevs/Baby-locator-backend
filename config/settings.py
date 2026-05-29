@@ -84,8 +84,6 @@ DATABASES = {
     }
 }
 
-print("DB PASSWORD:", os.getenv("DJANGO_DB_PASSWORD"))
-
 AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
@@ -162,7 +160,13 @@ REVENUECAT_ENTITLEMENT_ID = os.getenv(
 )
 REVENUECAT_PREMIUM_PRODUCT_IDS = env_list(
     "REVENUECAT_PREMIUM_PRODUCT_IDS",
-    ["monthly", "yearly", "lifetime"],
+    [
+        "monthly",
+        "yearly",
+        "lifetime",
+        "com.location.tracke.parental.control.monthly",
+        "com.location.tracke.parental.control.yearly",
+    ],
 )
 REVENUECAT_LIFETIME_PRODUCT_IDS = env_list(
     "REVENUECAT_LIFETIME_PRODUCT_IDS",
