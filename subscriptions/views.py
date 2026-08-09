@@ -4,7 +4,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.authentication import build_lite_token, lite_app_key_is_valid
+from accounts.authentication import build_lite_token
 
 from .services import process_revenuecat_event, webhook_auth_is_valid
 
@@ -13,15 +13,16 @@ class LiteAccessTokenView(APIView):
     """Exchange a normal authenticated token for a signed Lite edition token.
 
     The paid app continues using its ordinary DRF token and RevenueCat rules.
-    Only the Lite build knows the deployment-specific access key required to
-    mint this signed token. No user premium fields are changed in the database.
+    Baby Locator Lite identifies itself with ``X-App-Edition: lite`` and gets a
+    signed Lite token. No user premium fields are changed in the database.
     """
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if not lite_app_key_is_valid(request.headers.get("X-Lite-App-Key")):
-            return Response({"detail": "invalid lite app key"}, status=403)
+        edition = (request.headers.get("X-App-Edition") or "").strip().lower()
+        if edition != "lite":
+            return Response({"detail": "lite edition required"}, status=403)
 
         token_key = getattr(request.auth, "key", "")
         if not token_key:
