@@ -10,7 +10,8 @@ LITE_TOKEN_PREFIX = "lite"
 
 
 def _lite_signature(token_key: str) -> str:
-    signing_key = settings.LITE_TOKEN_SIGNING_KEY.encode("utf-8")
+    """Sign Lite credentials with Django's existing SECRET_KEY."""
+    signing_key = settings.SECRET_KEY.encode("utf-8")
     payload = f"{LITE_TOKEN_PREFIX}:{token_key}".encode("utf-8")
     return hmac.new(signing_key, payload, hashlib.sha256).hexdigest()
 
@@ -18,15 +19,6 @@ def _lite_signature(token_key: str) -> str:
 def build_lite_token(token_key: str) -> str:
     """Wrap an existing DRF token in a backend-signed Lite credential."""
     return f"{LITE_TOKEN_PREFIX}.{token_key}.{_lite_signature(token_key)}"
-
-
-def lite_app_key_is_valid(value: str | None) -> bool:
-    """Validate the deployment-specific key used only to mint Lite tokens."""
-    expected = (settings.LITE_APP_ACCESS_KEY or "").strip()
-    actual = (value or "").strip()
-    if not expected or not actual:
-        return False
-    return hmac.compare_digest(actual, expected)
 
 
 class EditionTokenAuthentication(TokenAuthentication):
