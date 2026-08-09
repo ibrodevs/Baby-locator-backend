@@ -1,14 +1,9 @@
-from django.test import override_settings
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
 from accounts.models import User
 
 
-@override_settings(
-    LITE_APP_ACCESS_KEY="test-lite-app-key",
-    LITE_TOKEN_SIGNING_KEY="test-lite-signing-key",
-)
 class PaidAndLiteAccessTests(APITestCase):
     def setUp(self):
         self.parent = User.objects.create_user(
@@ -46,7 +41,7 @@ class PaidAndLiteAccessTests(APITestCase):
         response = self.client.get(self.location_url)
         self.assertEqual(response.status_code, 404)
 
-    def test_lite_token_exchange_requires_lite_app_key(self):
+    def test_lite_token_exchange_requires_lite_edition_header(self):
         self._auth(self.token.key)
         response = self.client.post(self.exchange_url, {}, format="json")
         self.assertEqual(response.status_code, 403)
@@ -57,7 +52,7 @@ class PaidAndLiteAccessTests(APITestCase):
             self.exchange_url,
             {},
             format="json",
-            HTTP_X_LITE_APP_KEY="test-lite-app-key",
+            HTTP_X_APP_EDITION="lite",
         )
         self.assertEqual(response.status_code, 200)
         lite_token = response.data["token"]
@@ -76,7 +71,7 @@ class PaidAndLiteAccessTests(APITestCase):
             self.exchange_url,
             {},
             format="json",
-            HTTP_X_LITE_APP_KEY="test-lite-app-key",
+            HTTP_X_APP_EDITION="lite",
         )
         lite_token = response.data["token"]
         tampered = f"{lite_token[:-1]}{'0' if lite_token[-1] != '0' else '1'}"
