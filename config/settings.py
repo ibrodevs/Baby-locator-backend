@@ -88,7 +88,7 @@ AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.TokenAuthentication",
+        "accounts.authentication.EditionTokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -124,6 +124,13 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Baby Locator Lite. Paid/legacy clients continue using the existing DRF token
+# and RevenueCat flow. Lite must present LITE_APP_ACCESS_KEY once to exchange
+# its normal token for a backend-signed Lite token. Keep these values stable
+# across backend restarts/deployments.
+LITE_APP_ACCESS_KEY = os.getenv("LITE_APP_ACCESS_KEY", "").strip()
+LITE_TOKEN_SIGNING_KEY = os.getenv("LITE_TOKEN_SIGNING_KEY", SECRET_KEY).strip()
 
 # Firebase Cloud Messaging
 # Path to the service account JSON file downloaded from Firebase Console.
