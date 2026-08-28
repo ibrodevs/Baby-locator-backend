@@ -156,15 +156,15 @@ WEBRTC_TURN_TTL_SECONDS = int(os.getenv("WEBRTC_TURN_TTL_SECONDS", "86400"))
 # RevenueCat
 REVENUECAT_PUBLIC_API_KEY_ANDROID = os.getenv(
     "REVENUECAT_PUBLIC_API_KEY_ANDROID",
-    os.getenv("REVENUECAT_PUBLIC_API_KEY", "test_JSSNigqntAdnsSPLrHFggHWpZpm"),
+    os.getenv("REVENUECAT_PUBLIC_API_KEY", "goog_EqvRQpJxoxPTrEyftuZNYNpXrog"),
 )
 REVENUECAT_PUBLIC_API_KEY_IOS = os.getenv(
     "REVENUECAT_PUBLIC_API_KEY_IOS",
-    os.getenv("REVENUECAT_PUBLIC_API_KEY", "test_JSSNigqntAdnsSPLrHFggHWpZpm"),
+    os.getenv("REVENUECAT_PUBLIC_API_KEY", "goog_EqvRQpJxoxPTrEyftuZNYNpXrog"),
 )
 REVENUECAT_PUBLIC_API_KEY_FALLBACK = os.getenv(
     "REVENUECAT_PUBLIC_API_KEY",
-    "test_JSSNigqntAdnsSPLrHFggHWpZpm",
+    "goog_EqvRQpJxoxPTrEyftuZNYNpXrog",
 )
 REVENUECAT_ENTITLEMENT_ID = os.getenv(
     "REVENUECAT_ENTITLEMENT_ID",
