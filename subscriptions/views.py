@@ -1,3 +1,4 @@
+from django.conf import settings
 import json
 
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -7,6 +8,31 @@ from rest_framework.views import APIView
 from accounts.authentication import build_lite_token
 
 from .services import process_revenuecat_event, webhook_auth_is_valid
+
+
+class RevenueCatConfigView(APIView):
+    """Returns the public RevenueCat configuration (API keys, entitlement ID, offerings).
+
+    Allows the mobile client to fetch RevenueCat API keys dynamically from the server
+    without requiring --dart-define compilation parameters or embedding production keys.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response(
+            {
+                "android_api_key": settings.REVENUECAT_PUBLIC_API_KEY_ANDROID,
+                "ios_api_key": settings.REVENUECAT_PUBLIC_API_KEY_IOS,
+                "api_key": settings.REVENUECAT_PUBLIC_API_KEY_FALLBACK
+                or settings.REVENUECAT_PUBLIC_API_KEY_ANDROID,
+                "entitlement_id": settings.REVENUECAT_ENTITLEMENT_ID,
+                "premium_product_ids": settings.REVENUECAT_PREMIUM_PRODUCT_IDS,
+            },
+            status=200,
+        )
+
 
 
 class LiteAccessTokenView(APIView):

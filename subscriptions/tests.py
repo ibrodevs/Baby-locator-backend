@@ -79,3 +79,11 @@ class PaidAndLiteAccessTests(APITestCase):
         self._auth(tampered)
         response = self.client.get("/api/auth/me/")
         self.assertEqual(response.status_code, 401)
+
+    def test_revenuecat_config_returns_public_keys(self):
+        response = self.client.get("/api/revenuecat/config/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("android_api_key", response.data)
+        self.assertIn("ios_api_key", response.data)
+        self.assertIn("entitlement_id", response.data)
+
