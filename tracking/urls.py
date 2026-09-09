@@ -6,6 +6,7 @@ from .views import (
     AlertReadAllView,
     AlertReadView,
     AllChildrenLocationsView,
+    AppConfigView,
     AroundAudioStreamView,
     AroundAudioLiveStreamView,
     AroundAudioLiveUploadView,
@@ -66,4 +67,5 @@ urlpatterns = [
     path("alerts/", ParentAlertsView.as_view()),
     path("alerts/<int:alert_id>/read/", AlertReadView.as_view()),
     path("alerts/read-all/", AlertReadAllView.as_view()),
+    path("app-config/", AppConfigView.as_view()),
 ]

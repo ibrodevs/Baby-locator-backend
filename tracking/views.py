@@ -19,7 +19,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import viewsets
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -1579,6 +1579,20 @@ class IceServersView(APIView):
                 })
 
         return Response({"iceServers": ice_servers})
+
+
+class AppConfigView(APIView):
+    """
+    Public configuration endpoint providing client-facing settings,
+    including the Google Maps API key loaded from .env.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response({
+            "google_maps_api_key": getattr(settings, "GOOGLE_MAPS_API_KEY", ""),
+            "is_test": getattr(settings, "IS_TEST", False),
+        })
 
 
 class SosView(APIView):

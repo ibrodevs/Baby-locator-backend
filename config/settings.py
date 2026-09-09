@@ -1,5 +1,8 @@
-from dotenv import load_dotenv
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 import os
 from pathlib import Path
@@ -24,6 +27,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-secret-change-me")
 DEBUG = env_bool("DJANGO_DEBUG", True)
 IS_TEST = env_bool("IS_TEST", False)
+GOOGLE_MAPS_API_KEY = (
+    os.getenv("GOOGLE_MAPS_ANDROID_API_KEY")
+    or os.getenv("GOOGLE_MAPS_API_KEY")
+    or os.getenv("MAPS_API_KEY")
+    or ""
+).strip()
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", ["*"])
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
