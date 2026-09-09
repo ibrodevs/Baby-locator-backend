@@ -1,0 +1,9 @@
+*.pyc
+__pycache__/
+*.sqlite3
+.env
+.venv/
+media/*
+!media/.gitkeep
+.DS_Store
+staticfiles/
