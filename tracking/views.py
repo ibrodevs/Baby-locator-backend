@@ -2,6 +2,7 @@ import base64
 import calendar
 import hashlib
 import hmac
+import json
 import logging
 import math
 import mimetypes
@@ -1732,7 +1733,10 @@ class BlockedAppsView(APIView):
             send_command_push(
                 child.fcm_token,
                 RemoteDeviceCommand.TYPE_SYNC_BLOCKED_APPS,
-                {"command_id": cmd.id},
+                extra_data={
+                    "command_id": str(cmd.id),
+                    "blocked_packages": json.dumps(blocked_packages),
+                },
             )
 
 
