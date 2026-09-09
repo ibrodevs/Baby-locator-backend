@@ -4,6 +4,7 @@ from datetime import timedelta
 import secrets
 import uuid
 
+from django.conf import settings
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status
@@ -467,3 +468,52 @@ def invite_landing(request, code):
 </html>"""
 
     return HttpResponse(html)
+
+
+class TestModeStatusView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response({"is_test": bool(getattr(settings, "IS_TEST", False))})
+
+
+class LoginAsPremiumTestView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        if not getattr(settings, "IS_TEST", False):
+            return Response(
+                {"detail": "Test mode is disabled."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        test_username = "test_premium_parent"
+        entitlement = getattr(settings, "REVENUECAT_ENTITLEMENT_ID", "family_security_pro")
+        expires_at = timezone.now() + timedelta(days=365 * 10)
+
+        user = User.objects.filter(username=test_username).first()
+        if user is None:
+            user = User.objects.create_user(
+                username=test_username,
+                password=secrets.token_urlsafe(24),
+                display_name="Premium Tester",
+                role=User.ROLE_PARENT,
+            )
+
+        user.role = User.ROLE_PARENT
+        user.is_premium = True
+        user.premium_entitlement = entitlement
+        user.premium_product_id = "yearly"
+        user.premium_expires_at = expires_at
+        user.premium_updated_at = timezone.now()
+        user.save()
+
+        token = token_for(user)
+        return Response(
+            {
+                "token": token,
+                "user": UserSerializer(user, context={"request": request}).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+

@@ -7,16 +7,20 @@ from .views import (
     ChildrenView,
     FcmTokenView,
     InviteCodeView,
+    LoginAsPremiumTestView,
     LoginView,
     MeView,
     RegisterChildWithCodeView,
     RegisterParentView,
+    TestModeStatusView,
 )
 
 urlpatterns = [
     path("register/", RegisterParentView.as_view()),
     path("login/", LoginView.as_view()),
     path("me/", MeView.as_view()),
+    path("test-mode/", TestModeStatusView.as_view(), name="test-mode-status"),
+    path("login-as-premium/", LoginAsPremiumTestView.as_view(), name="login-as-premium"),
     path("fcm-token/", FcmTokenView.as_view()),
     path("children/", ChildrenView.as_view()),
     path("children/<int:child_id>/", ChildDetailView.as_view()),

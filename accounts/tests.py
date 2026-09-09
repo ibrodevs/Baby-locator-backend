@@ -1,7 +1,7 @@
 from io import StringIO
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from accounts.models import User, InviteCode
@@ -115,3 +115,65 @@ class AccountComplianceTests(TestCase):
         # Child 2 attempts to claim the same session token
         with self.assertRaises(PermissionError):
             broker.get_or_create("shared_token_xyz", child_id=202)
+
+
+class TestModeApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    @override_settings(IS_TEST=True)
+    def test_status_when_is_test_true(self):
+        response = self.client.get("/api/auth/test-mode/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"is_test": True})
+
+    @override_settings(IS_TEST=False)
+    def test_status_when_is_test_false(self):
+        response = self.client.get("/api/auth/test-mode/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"is_test": False})
+
+    @override_settings(IS_TEST=False)
+    def test_login_as_premium_forbidden_when_test_disabled(self):
+        response = self.client.post("/api/auth/login-as-premium/", {})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("detail", response.json())
+
+    @override_settings(IS_TEST=True)
+    def test_login_as_premium_success_and_can_add_children(self):
+        response = self.client.post("/api/auth/login-as-premium/", {})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("token", data)
+        self.assertIn("user", data)
+
+        user_data = data["user"]
+        self.assertEqual(user_data["role"], "parent")
+        self.assertTrue(user_data["is_premium"])
+        self.assertEqual(user_data["premium_entitlement"], "family_security_pro")
+        self.assertIsNotNone(user_data["premium_expires_at"])
+
+        # Verify user in DB
+        from subscriptions.services import parent_can_add_child
+        user = User.objects.get(username="test_premium_parent")
+        self.assertEqual(user.role, User.ROLE_PARENT)
+        self.assertTrue(user.is_premium)
+        self.assertTrue(parent_can_add_child(user))
+
+        # Test authenticated child creation
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {data['token']}")
+        res1 = self.client.post(
+            "/api/auth/children/",
+            {"display_name": "Test Kid 1", "gender": "boy"},
+            format="json",
+        )
+        self.assertEqual(res1.status_code, 201)
+
+        res2 = self.client.post(
+            "/api/auth/children/",
+            {"display_name": "Test Kid 2", "gender": "girl"},
+            format="json",
+        )
+        self.assertEqual(res2.status_code, 201)
+        self.assertEqual(user.children.count(), 2)
+
