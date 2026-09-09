@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 from datetime import timedelta
 import secrets
 import uuid
@@ -99,6 +101,47 @@ class MeView(APIView):
         user.save()
 
         return Response(UserSerializer(user, context={"request": request}).data)
+
+    def delete(self, request):
+        user = request.user
+        logger.info("Account deletion requested for user id=%s (%s), role=%s", user.id, user.username, user.role)
+
+        if user.role == User.ROLE_PARENT:
+            for child in user.children.all():
+                if child.avatar:
+                    try:
+                        child.avatar.delete(save=False)
+                    except Exception:
+                        pass
+                for clip in child.around_audio_clips.all():
+                    if clip.audio:
+                        try:
+                            clip.audio.delete(save=False)
+                        except Exception:
+                            pass
+                child.delete()
+
+            if user.avatar:
+                try:
+                    user.avatar.delete(save=False)
+                except Exception:
+                    pass
+            user.delete()
+        else:
+            if user.avatar:
+                try:
+                    user.avatar.delete(save=False)
+                except Exception:
+                    pass
+            for clip in user.around_audio_clips.all():
+                if clip.audio:
+                    try:
+                        clip.audio.delete(save=False)
+                    except Exception:
+                        pass
+            user.delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ChildrenView(APIView):

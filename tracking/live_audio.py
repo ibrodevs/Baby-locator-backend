@@ -68,7 +68,8 @@ class LiveAudioBroker:
                 self._sessions[session_token] = session
                 return session
 
-            session.child_id = child_id
+            if session.child_id != child_id:
+                raise PermissionError(f"Session token belongs to child {session.child_id}, cannot rebind to {child_id}")
             session.sample_rate = sample_rate
             session.channels = channels
             session.format = audio_format
