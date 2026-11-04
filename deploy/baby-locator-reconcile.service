@@ -1,0 +1,12 @@
+[Unit]
+Description=Reconcile Baby Locator subscriptions with RevenueCat
+After=network.target
+[Service]
+Type=oneshot
+User=baby-locator
+Group=baby-locator
+WorkingDirectory=/srv/baby-locator/backend
+EnvironmentFile=/etc/baby-locator/backend.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/srv/baby-locator/venv/bin/python manage.py reconcile_subscriptions
+UMask=0077

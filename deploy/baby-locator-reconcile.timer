@@ -1,0 +1,9 @@
+[Unit]
+Description=Hourly Baby Locator subscription reconciliation
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+RandomizedDelaySec=3min
+Persistent=true
+[Install]
+WantedBy=timers.target

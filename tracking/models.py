@@ -3,6 +3,13 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 from uuid import uuid4
+from datetime import timedelta
+
+def monitor_deadline():
+    return timezone.now() + timedelta(seconds=120)
+
+def command_deadline():
+    return timezone.now() + timedelta(seconds=120)
 
 
 class LocationUpdate(models.Model):
@@ -13,6 +20,9 @@ class LocationUpdate(models.Model):
     )
     lat = models.FloatField()
     lng = models.FloatField()
+    captured_at = models.DateTimeField(default=timezone.now)
+    accuracy = models.FloatField(null=True, blank=True)
+    is_cached = models.BooleanField(default=False)
     address = models.CharField(max_length=255, blank=True)
     battery = models.IntegerField(null=True, blank=True)
     charging = models.BooleanField(default=False)
@@ -188,6 +198,7 @@ class BlockedApp(models.Model):
 
 
 class AppIcon(models.Model):
+    id = models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")
     """Cached PNG icon (base64) for an app installed on the child's device."""
 
     child = models.ForeignKey(
@@ -277,6 +288,8 @@ class RemoteDeviceCommand(models.Model):
     )
     error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(default=command_deadline, db_index=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
     delivered_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
@@ -386,6 +399,11 @@ class MonitorSession(models.Model):
         choices=STATUS_CHOICES,
         default=STATUS_WAITING,
     )
+    expires_at = models.DateTimeField(default=monitor_deadline, db_index=True)
+    consented_at = models.DateTimeField(null=True, blank=True)
+    parent_last_seen = models.DateTimeField(null=True, blank=True)
+    child_last_seen = models.DateTimeField(null=True, blank=True)
+    transport = models.CharField(max_length=8, default="webrtc")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -414,10 +432,12 @@ class SignalingMessage(models.Model):
     sender_role = models.CharField(max_length=8)  # "parent" or "child"
     msg_type = models.CharField(max_length=16)  # "offer", "answer", "ice_candidate"
     payload = models.JSONField()
+    client_message_id = models.CharField(max_length=64, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["id"]
+        constraints = [models.UniqueConstraint(fields=["session", "sender_role", "client_message_id"], name="unique_signaling_delivery")]
 
     def __str__(self):
         return f"{self.sender_role}: {self.msg_type} (session {self.session_id})"

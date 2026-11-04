@@ -1,138 +1,31 @@
-# Deploy notes for reg.ru (89.108.81.151)
+# Production deployment
 
-The "Звук вокруг" / "Вокруг" features stream raw PCM audio over long-lived
-HTTP requests. nginx in front of gunicorn buffers both responses and request
-bodies by default — this kills realtime streaming.
+Use deploy/nginx.conf.example, deploy/baby-locator.service and gunicorn.conf.py as reviewed templates.
+Replace placeholders, configure HTTPS and private environment files before installing them.
 
-## 1. Nginx site config
+The main audio UI uses WebRTC; its media does not pass through Gunicorn. TURN is configured separately.
+Legacy HTTP PCM endpoints now use Redis streams across workers. Set LIVE_AUDIO_REDIS_URL (or REDIS_URL).
+Without a configured shared broker, production HTTP PCM returns 503 instead of silently routing audio
+into different worker memories. Do not expose Redis to the public internet.
 
-Put this **inside the `server { ... }` block** that proxies to gunicorn (do
-not duplicate the whole server block — just add/adjust the locations and the
-listen 80 part):
+All audio capture requires an active, child-confirmed MonitorSession. A background push only invites
+the child to open the app. Keep /media/ routed to authenticated Django; never add a public media alias.
+Query strings carry private session metadata; omit them from access logs.
 
-```nginx
-server {
-    listen 80;
-    server_name 89.108.81.151;
+Commands for a reviewed rollout (not automatically executed):
 
-    client_max_body_size 50m;
+1. Back up PostgreSQL and private media; verify restore and record deployed source SHA.
+2. Create a fresh Python 3.12 venv; install requirements.txt with --require-hashes.
+3. Install protected server ENV and Firebase service-account file; chmod 600.
+4. Run manage.py check, manage.py check --deploy and manage.py production_check.
+5. Run manage.py migrate --plan, then reviewed migrations, then collectstatic.
+6. Validate nginx/systemd configuration, deploy backend and the matching paid mobile build together.
+7. Schedule reconcile_subscriptions, process_account_deletions and cleanup_media (dry-run before --apply).
+8. Verify Play test purchase/restore, webhook, FCM, child consent, TURN relay and stop on real devices.
 
-    # Default proxy → gunicorn
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_http_version 1.1;
-        proxy_read_timeout  3600s;
-        proxy_send_timeout  3600s;
-    }
+Migrations close old audio sessions and invalidate queued commands before the upgrade. Location capture
+times are backfilled from existing created_at. AppIcon keeps its existing AutoField primary key.
 
-    # Realtime audio: parent download stream
-    location ~ ^/api/children/[0-9]+/around-audio/live/stream/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_http_version 1.1;
-        proxy_buffering           off;
-        proxy_cache               off;
-        chunked_transfer_encoding on;
-        proxy_read_timeout        3600s;
-        proxy_send_timeout        3600s;
-        gzip                      off;
-    }
-
-    # Realtime audio: child upload stream
-    location = /api/around-audio/live/upload/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_http_version 1.1;
-        proxy_request_buffering   off;
-        proxy_buffering           off;
-        client_max_body_size      0;
-        proxy_read_timeout        3600s;
-        proxy_send_timeout        3600s;
-    }
-
-    # WebRTC signaling poll (HTTP long-poll-ish)
-    location ~ ^/api/monitor/signal/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_http_version 1.1;
-        proxy_buffering   off;
-        proxy_read_timeout 60s;
-    }
-}
-```
-
-Apply:
-
-```bash
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-## 2. Gunicorn
-
-Gunicorn must use a worker class that supports streaming + many concurrent
-long-lived requests. Use `gthread` with multiple threads, e.g.:
-
-```bash
-gunicorn config.wsgi:application \
-    --bind 127.0.0.1:8000 \
-    --workers 3 \
-    --worker-class gthread \
-    --threads 8 \
-    --timeout 0 \
-    --keep-alive 75 \
-    --access-logfile -
-```
-
-`--timeout 0` is **mandatory**. Otherwise gunicorn kills the worker after
-30s of "no progress" (which is exactly what a streaming upload looks like
-to gunicorn's heuristic) and you get either 504 on the parent or the child
-upload silently aborts mid-stream. The classic symptom is "ждал 2–3 минуты
-и вышло 504" — that's gunicorn killing the upload worker, not nginx.
-
-## 2.1 Sanity check
-
-After applying the config and restarting, from the server itself run:
-
-```bash
-# 1. Verify nginx is forwarding chunked POST without buffering.
-curl -v -N -X POST \
-    -H 'Authorization: Token <child_token>' \
-    -H 'Transfer-Encoding: chunked' \
-    --data-binary @- \
-    "http://127.0.0.1/api/around-audio/live/upload/?session_token=test123" \
-    < /dev/zero
-
-# Within ~1s gunicorn's access log should show the request landing
-# (not waiting for the upload to finish). If it only shows up after
-# Ctrl+C, request buffering is still on.
-```
-
-```bash
-# 2. Verify the parent stream flushes immediately.
-curl -v -N \
-    -H 'Authorization: Token <parent_token>' \
-    "http://127.0.0.1/api/children/<child_id>/around-audio/live/stream/?session_token=test123"
-
-# You should see the silence keep-alive frame land within ~1s and then
-# every 5s. If nothing arrives for 60s, response buffering is still on.
-```
-
-## 3. Django env
-
-`pythonanywhere_wsgi.py` no longer forces SSL redirect / HSTS, because the
-client uses plain `http://89.108.81.151`. If/when you add a real TLS cert
-(e.g. via Let's Encrypt on a domain), flip those flags back to `True` AND
-update `lib/core/services/api_client.dart` to use `https://your.domain`.
+Old clients cannot provide the new per-session consent. Upgrade the paid child app for audio. Lite source
+is deliberately unchanged; server-side Lite licenses are explicit admin grants, never header-based.
+Do not rewrite Git history, rotate live keys, restart production or submit a Play release automatically.

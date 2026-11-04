@@ -9,6 +9,7 @@ from .views import (
     InviteCodeView,
     LoginAsPremiumTestView,
     LoginView,
+    LogoutView,
     MeView,
     RegisterChildWithCodeView,
     RegisterParentView,
@@ -18,6 +19,7 @@ from .views import (
 urlpatterns = [
     path("register/", RegisterParentView.as_view()),
     path("login/", LoginView.as_view()),
+    path("logout/", LogoutView.as_view()),
     path("me/", MeView.as_view()),
     path("test-mode/", TestModeStatusView.as_view(), name="test-mode-status"),
     path("login-as-premium/", LoginAsPremiumTestView.as_view(), name="login-as-premium"),

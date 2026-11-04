@@ -1,0 +1,17 @@
+[Unit]
+Description=Baby Locator Django API
+After=network.target
+[Service]
+User=baby-locator
+Group=baby-locator
+WorkingDirectory=/srv/baby-locator/backend
+EnvironmentFile=/etc/baby-locator/backend.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/srv/baby-locator/venv/bin/python manage.py production_check
+ExecStart=/srv/baby-locator/venv/bin/gunicorn --config gunicorn.conf.py config.wsgi:application
+Restart=on-failure
+PrivateTmp=true
+NoNewPrivileges=true
+UMask=0077
+[Install]
+WantedBy=multi-user.target

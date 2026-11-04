@@ -8,3 +8,12 @@ media/*
 !media/.gitkeep
 .DS_Store
 staticfiles/
+# Private deployment material and generated local environments
+**/__pycache__/
+*.sqlite3
+firebase-service-account*.json
+*service-account*.json
+.env.*
+!.env.*.example
+.venv*/
+venv*/

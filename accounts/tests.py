@@ -139,7 +139,7 @@ class TestModeApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertIn("detail", response.json())
 
-    @override_settings(IS_TEST=True)
+    @override_settings(IS_TEST=True, DEBUG=True)
     def test_login_as_premium_success_and_can_add_children(self):
         response = self.client.post("/api/auth/login-as-premium/", {})
         self.assertEqual(response.status_code, 200)

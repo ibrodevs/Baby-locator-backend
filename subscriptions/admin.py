@@ -9,3 +9,7 @@ class RevenueCatWebhookEventAdmin(admin.ModelAdmin):
     list_filter = ("event_type", "environment", "processed_at")
     search_fields = ("event_id", "app_user_id", "product_id")
     readonly_fields = ("raw_payload", "processed_at")
+
+from .models import LiteAccessGrant, CustomerEntitlement
+admin.site.register(LiteAccessGrant)
+admin.site.register(CustomerEntitlement)

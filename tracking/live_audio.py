@@ -149,3 +149,89 @@ class LiveAudioBroker:
 
 
 live_audio_broker = LiveAudioBroker()
+
+
+class RedisLiveAudioBroker:
+    """Shared bounded PCM streams; independent Gunicorn workers see the same bytes."""
+    def __init__(self, url):
+        import redis
+        self.client = redis.Redis.from_url(url, socket_connect_timeout=3, socket_timeout=4)
+
+    def _keys(self, token):
+        import hashlib
+        key = hashlib.sha256(token.encode()).hexdigest()
+        return f"audio:{key}:meta", f"audio:{key}:frames"
+
+    def get_or_create(self, session_token, *, child_id, sample_rate=16000, channels=1, audio_format="pcm_s16le"):
+        meta, stream = self._keys(session_token)
+        # One atomic initialization prevents partial metadata across concurrent workers.
+        script = """
+        if redis.call('EXISTS', KEYS[1]) == 0 then
+          redis.call('HSET', KEYS[1], 'child', ARGV[1], 'rate', ARGV[2], 'channels', ARGV[3], 'format', ARGV[4], 'closed', '0')
+          redis.call('EXPIRE', KEYS[1], 660)
+        end
+        return redis.call('HGET', KEYS[1], 'child')
+        """
+        owner = self.client.eval(script, 1, meta, child_id, sample_rate, channels, audio_format)
+        if int(owner) != child_id:
+            raise PermissionError("Audio session belongs to another child.")
+        data = self.client.hgetall(meta)
+        return LiveAudioSessionState(child_id=child_id, sample_rate=int(data[b"rate"]),
+                                     channels=int(data[b"channels"]), format=data[b"format"].decode(), closed=data.get(b"closed") == b"1")
+
+    def publish(self, session_token, *, child_id, data):
+        state = self.get_or_create(session_token, child_id=child_id)
+        if state.closed or not data:
+            return
+        meta, stream = self._keys(session_token)
+        # At most 128 x 4096-byte frames; no unbounded recording in Redis.
+        self.client.xadd(stream, {b"pcm": data}, maxlen=128, approximate=False)
+        self.client.expire(stream, 660)
+
+    def finish(self, session_token, *, child_id=None):
+        meta, stream = self._keys(session_token)
+        owner = self.client.hget(meta, "child")
+        if owner is not None and (child_id is None or int(owner) == child_id):
+            self.client.hset(meta, "closed", "1")
+            self.client.expire(meta, 30)
+            self.client.expire(stream, 30)
+
+    def iter_chunks(self, session_token, *, child_id):
+        self.get_or_create(session_token, child_id=child_id)
+        meta, stream = self._keys(session_token)
+        cursor = "0-0"
+        deadline = time.monotonic() + 600
+        yield _PRIMER_FRAME
+        while time.monotonic() < deadline:
+            state = self.client.hgetall(meta)
+            if not state or state.get(b"closed") == b"1":
+                return
+            result = self.client.xread({stream: cursor}, count=32, block=1000)
+            if not result:
+                yield _KEEPALIVE_FRAME
+            for _, frames in result:
+                for cursor, fields in frames:
+                    yield fields[b"pcm"]
+
+    def get_session(self, session_token):
+        meta, _ = self._keys(session_token)
+        data = self.client.hgetall(meta)
+        return self.get_or_create(session_token, child_id=int(data[b"child"])) if data else None
+
+
+class UnconfiguredLiveAudioBroker:
+    def __getattr__(self, name):
+        if name == "finish":
+            return lambda *args, **kwargs: None
+        from rest_framework.exceptions import APIException
+        class StreamingUnavailable(APIException):
+            status_code = 503
+            default_detail = "HTTP audio relay is not configured. Set LIVE_AUDIO_REDIS_URL or use WebRTC."
+        raise StreamingUnavailable()
+
+
+from django.conf import settings
+if settings.LIVE_AUDIO_REDIS_URL:
+    live_audio_broker = RedisLiveAudioBroker(settings.LIVE_AUDIO_REDIS_URL)
+elif not settings.DEBUG:
+    live_audio_broker = UnconfiguredLiveAudioBroker()

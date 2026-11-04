@@ -6,6 +6,11 @@ import uuid
 
 from django.conf import settings
 from django.http import HttpResponse
+from django.db import transaction
+from django.utils.html import escape
+from rest_framework.authtoken.models import Token
+from .throttles import AuthenticationThrottle
+from .uploads import validate_avatar
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -15,7 +20,7 @@ from rest_framework.views import APIView
 
 from subscriptions.services import parent_can_add_child, premium_required_response
 
-from .models import InviteCode, User
+from .models import DeviceInstallation, InviteCode, User
 from .serializers import (
     CreateChildSerializer,
     LoginSerializer,
@@ -60,6 +65,7 @@ def _mark_child_joined(user):
 
 
 class RegisterParentView(APIView):
+    throttle_classes = [AuthenticationThrottle]
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -73,6 +79,7 @@ class RegisterParentView(APIView):
 
 
 class LoginView(APIView):
+    throttle_classes = [AuthenticationThrottle]
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -104,45 +111,19 @@ class MeView(APIView):
         return Response(UserSerializer(user, context={"request": request}).data)
 
     def delete(self, request):
-        user = request.user
-        logger.info("Account deletion requested for user id=%s (%s), role=%s", user.id, user.username, user.role)
-
-        if user.role == User.ROLE_PARENT:
-            for child in user.children.all():
-                if child.avatar:
-                    try:
-                        child.avatar.delete(save=False)
-                    except Exception:
-                        pass
-                for clip in child.around_audio_clips.all():
-                    if clip.audio:
-                        try:
-                            clip.audio.delete(save=False)
-                        except Exception:
-                            pass
-                child.delete()
-
-            if user.avatar:
-                try:
-                    user.avatar.delete(save=False)
-                except Exception:
-                    pass
-            user.delete()
-        else:
-            if user.avatar:
-                try:
-                    user.avatar.delete(save=False)
-                except Exception:
-                    pass
-            for clip in user.around_audio_clips.all():
-                if clip.audio:
-                    try:
-                        clip.audio.delete(save=False)
-                    except Exception:
-                        pass
-            user.delete()
-
+        with transaction.atomic():
+            request.user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LogoutView(APIView):
+    def post(self, request):
+        # Current DRF schema has one token per user: revocation signs out all sessions.
+        request.user.installations.all().delete()
+        request.user.fcm_token = ""
+        request.user.save(update_fields=["fcm_token"])
+        Token.objects.filter(user=request.user).delete()
+        return Response(status=204)
 
 
 class ChildrenView(APIView):
@@ -152,9 +133,11 @@ class ChildrenView(APIView):
         qs = request.user.children.all().order_by("id")
         return Response(UserSerializer(qs, many=True, context={"request": request}).data)
 
+    @transaction.atomic
     def post(self, request):
         if request.user.role != User.ROLE_PARENT:
             return Response({"detail": "parents only"}, status=403)
+        request.user = User.objects.select_for_update().get(pk=request.user.pk)
         if not parent_can_add_child(request.user):
             return premium_required_response()
         s = CreateChildSerializer(data=request.data)
@@ -227,6 +210,7 @@ class ChildAvatarUploadView(APIView):
         avatar = request.FILES.get("avatar")
         if not avatar:
             return Response({"detail": "No avatar file provided"}, status=400)
+        avatar = validate_avatar(avatar)
         child.avatar = avatar
         child.save(update_fields=["avatar"])
         return Response(UserSerializer(child, context={"request": request}).data)
@@ -236,18 +220,19 @@ class FcmTokenView(APIView):
     """Register or update the FCM token for the authenticated user."""
 
     def post(self, request):
-        fcm_token = request.data.get("fcm_token", "").strip()
-        if not fcm_token:
-            return Response({"detail": "fcm_token is required"}, status=400)
-        # One physical app install should belong to exactly one backend user.
-        # If the same device was previously used by another account (for
-        # example child -> parent or parent -> child), clear the stale mapping
-        # first so command pushes don't wake the wrong session.
-        User.objects.filter(fcm_token=fcm_token).exclude(id=request.user.id).update(
-            fcm_token=""
-        )
-        request.user.fcm_token = fcm_token
-        request.user.save(update_fields=["fcm_token"])
+        fcm_token = str(request.data.get("fcm_token", "")).strip()
+        installation_id = str(request.data.get("installation_id") or "legacy").strip()
+        if not fcm_token or len(fcm_token) > 512 or not 1 <= len(installation_id) <= 64:
+            return Response({"detail": "invalid device token or installation_id"}, status=400)
+        if not request.user.installations.filter(installation_id=installation_id).exists() and request.user.installations.count() >= 20:
+            return Response({"detail": "Device installation limit reached"}, status=400)
+        with transaction.atomic():
+            DeviceInstallation.objects.filter(fcm_token=fcm_token).exclude(user=request.user).delete()
+            User.objects.filter(fcm_token=fcm_token).exclude(pk=request.user.pk).update(fcm_token="")
+            DeviceInstallation.objects.update_or_create(user=request.user, installation_id=installation_id,
+                                                        defaults={"fcm_token": fcm_token})
+            request.user.fcm_token = fcm_token
+            request.user.save(update_fields=["fcm_token"])
         _mark_child_joined(request.user)
         return Response({"status": "ok"})
 
@@ -259,6 +244,7 @@ class AvatarUploadView(APIView):
         avatar = request.FILES.get("avatar")
         if not avatar:
             return Response({"detail": "No avatar file provided"}, status=400)
+        avatar = validate_avatar(avatar)
         request.user.avatar = avatar
         request.user.save(update_fields=["avatar"])
         return Response(UserSerializer(request.user, context={"request": request}).data)
@@ -326,62 +312,40 @@ class InviteCodeView(APIView):
 
 
 class RegisterChildWithCodeView(APIView):
+    throttle_classes = [AuthenticationThrottle]
     """Child registers themselves using an invite code."""
     permission_classes = [AllowAny]
 
+    @transaction.atomic
     def post(self, request):
-        s = RegisterChildWithCodeSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
-        code_str = "".join(ch for ch in s.validated_data["code"] if ch.isdigit())
-        display_name = s.validated_data.get("display_name", "")
-        try:
-            invite = InviteCode.objects.get(code=code_str)
-        except InviteCode.DoesNotExist:
-            return Response({"detail": "Invalid invite code"}, status=400)
-        if invite.expires_at <= timezone.now():
-            return Response({"detail": "Invite code expired"}, status=400)
-
-        if invite.child_id:
-            child = invite.child
-            _mark_child_joined(child)
-            return Response(
-                {
-                    "token": token_for(child),
-                    "user": UserSerializer(child, context={"request": request}).data,
-                },
-                status=status.HTTP_200_OK,
-            )
-
-        if not display_name:
-            return Response(
-                {"detail": "Child profile is not ready for this code"},
-                status=400,
-            )
-
-        child = (
-            invite.parent.children.filter(display_name__iexact=display_name)
-            .order_by("id")
-            .first()
-        )
-        status_code = status.HTTP_200_OK
-
+        serializer = RegisterChildWithCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        code = "".join(ch for ch in serializer.validated_data["code"] if ch.isascii() and ch.isdigit())
+        invite = InviteCode.objects.select_for_update().filter(code=code).first()
+        if not invite or not invite.is_valid:
+            return Response({"detail": "Invalid, used or expired invite code"}, status=400)
+        parent = User.objects.select_for_update().get(pk=invite.parent_id)
+        child = invite.child
+        status_code = 200
         if child is None:
+            name = serializer.validated_data.get("display_name", "").strip()
+            if not name:
+                return Response({"detail": "Child profile is not ready for this code"}, status=400)
+            if not parent_can_add_child(parent):
+                return premium_required_response()
             username, password = _generate_child_credentials()
-            child = User.objects.create_user(
-                username=username,
-                password=password,
-                display_name=display_name,
-                role=User.ROLE_CHILD,
-                parent=invite.parent,
-            )
-            status_code = status.HTTP_201_CREATED
-
-        _mark_child_joined(child)
-
-        return Response(
-            {"token": token_for(child), "user": UserSerializer(child, context={"request": request}).data},
-            status=status_code,
-        )
+            child = User.objects.create_user(username=username, password=password, display_name=name,
+                                             role=User.ROLE_CHILD, parent=parent)
+            status_code = 201
+        # An intentional new pairing code rotates credentials for the previous child device.
+        Token.objects.filter(user=child).delete()
+        child.installations.all().delete()
+        child.fcm_token = ""
+        child.joined_at = timezone.now()
+        child.save(update_fields=["fcm_token", "joined_at"])
+        invite.used_by = child
+        invite.save(update_fields=["used_by"])
+        return Response({"token": token_for(child), "user": UserSerializer(child, context={"request": request}).data}, status=status_code)
 
 
 def invite_landing(request, code):
@@ -390,8 +354,8 @@ def invite_landing(request, code):
         normalized_code = "".join(ch for ch in code if ch.isdigit())
         invite = InviteCode.objects.get(code=normalized_code)
         valid = invite.is_valid
-        parent_name = invite.parent.display_name or invite.parent.username
-        child_name = invite.child.display_name if invite.child else ""
+        parent_name = escape(invite.parent.display_name or invite.parent.username)
+        child_name = escape(invite.child.display_name) if invite.child else ""
     except InviteCode.DoesNotExist:
         valid = False
         parent_name = ""
@@ -481,7 +445,7 @@ class LoginAsPremiumTestView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        if not getattr(settings, "IS_TEST", False):
+        if not (settings.DEBUG and getattr(settings, "IS_TEST", False)):
             return Response(
                 {"detail": "Test mode is disabled."},
                 status=status.HTTP_403_FORBIDDEN,

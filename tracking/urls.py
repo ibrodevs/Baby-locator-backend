@@ -1,5 +1,6 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
+from .geocoding import ReverseGeocodeView
 
 from .views import (
     ActivateMonitoringView,
@@ -26,6 +27,7 @@ from .views import (
     LatestAroundAudioView,
     MonitorSignalPollView,
     MonitorSignalSendView,
+    MonitorConsentView,
     ParentAlertsView,
     PendingDeviceCommandsView,
     SafeZoneViewSet,
@@ -38,6 +40,7 @@ router = DefaultRouter()
 router.register(r"safe-zones", SafeZoneViewSet, basename="safezone")
 
 urlpatterns = [
+    path("geocode/reverse/", ReverseGeocodeView.as_view()),
     path("", include(router.urls)),
     path("locations/", ShareLocationView.as_view()),
     path("device-stats/sync/", ChildDeviceStatsSyncView.as_view()),
@@ -58,6 +61,7 @@ urlpatterns = [
     path("children/<int:child_id>/app-limits/", ChildAppLimitView.as_view()),
     path("children/<int:child_id>/blocked-apps/", BlockedAppsView.as_view()),
     path("children/<int:child_id>/blocked-apps/<int:blocked_id>/", UnblockAppView.as_view()),
+    path("monitor/consent/", MonitorConsentView.as_view()),
     path("monitor/activate/", ActivateMonitoringView.as_view()),
     path("monitor/deactivate/", DeactivateMonitoringView.as_view()),
     path("monitor/signal/send/", MonitorSignalSendView.as_view()),

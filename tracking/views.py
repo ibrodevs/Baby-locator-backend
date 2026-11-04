@@ -13,6 +13,8 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q, F
+from rest_framework.exceptions import PermissionDenied
 from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -25,7 +27,8 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.serializers import UserSerializer
-from subscriptions.services import has_premium_access, premium_required_response
+from subscriptions.services import has_premium_access, premium_required_response, can_view_location
+from .monitoring import authorized_session, close_session, session_is_live
 
 from .live_audio import live_audio_broker
 from .models import (
@@ -152,6 +155,11 @@ class SafeZoneViewSet(viewsets.ModelViewSet):
             return SafeZone.objects.filter(parent=self.request.user.parent)
         return SafeZone.objects.none()
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and request.user.role != User.ROLE_PARENT:
+            raise PermissionDenied("Only a parent can modify safe zones.")
+
     def perform_create(self, serializer):
         serializer.save(parent=self.request.user)
 
@@ -180,6 +188,9 @@ class ShareLocationView(APIView):
             lat=s.validated_data["lat"],
             lng=s.validated_data["lng"],
             address=address,
+            captured_at=s.validated_data.get("captured_at", timezone.now()),
+            accuracy=s.validated_data.get("accuracy"),
+            is_cached=s.validated_data.get("is_cached", False),
             battery=s.validated_data.get("battery"),
             charging=s.validated_data.get("charging", False),
             active=s.validated_data.get("active", True),
@@ -187,7 +198,8 @@ class ShareLocationView(APIView):
 
         # --- Generate alerts for the parent ---
         parent = request.user.parent
-        if parent:
+        fresh = timezone.now() - loc.captured_at <= timedelta(minutes=2) and not loc.is_cached
+        if parent and fresh:
             self._check_location_alert(request.user, parent, loc)
             self._check_battery_alert(request.user, parent, loc)
             self._check_zone_transition_alerts(request.user, parent, loc)
@@ -350,9 +362,9 @@ class ChildLatestLocationView(APIView):
         child = _resolve_child_for_request(request, child_id)
         if child is None:
             return Response({"detail": "forbidden"}, status=403)
-        if not has_premium_access(request.user, child=child):
+        if not can_view_location(request.user, child=child):
             return premium_required_response()
-        loc = child.locations.first()
+        loc = child.locations.order_by("-captured_at", "-id").first()
         if not loc:
             return Response({"detail": "no location yet"}, status=404)
         device_status = getattr(child, "device_status", None)
@@ -392,7 +404,7 @@ class AllChildrenLocationsView(APIView):
         children = request.user.children.all().order_by("id")
         result = []
         for child in children:
-            loc = child.locations.first()
+            loc = child.locations.order_by("-captured_at", "-id").first()
             device_status = getattr(child, "device_status", None)
             location_data = LocationSerializer(loc).data if loc else None
             battery = (
@@ -1027,14 +1039,7 @@ class ChildDeviceCommandCreateView(APIView):
         serializer = RemoteDeviceCommandActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data.get("payload") or {}
-        protected_commands = {
-            RemoteDeviceCommand.TYPE_LOUD,
-            RemoteDeviceCommand.TYPE_LOUD_STOP,
-            RemoteDeviceCommand.TYPE_AROUND_START,
-            RemoteDeviceCommand.TYPE_AROUND_STOP,
-            RemoteDeviceCommand.TYPE_WEBRTC_MONITOR_START,
-            RemoteDeviceCommand.TYPE_WEBRTC_MONITOR_STOP,
-        }
+        protected_commands = {RemoteDeviceCommand.TYPE_LOUD, RemoteDeviceCommand.TYPE_AROUND_START, RemoteDeviceCommand.TYPE_WEBRTC_MONITOR_START}
         if (
             serializer.validated_data["command_type"] in protected_commands
             and not has_premium_access(request.user, child=child)
@@ -1042,7 +1047,8 @@ class ChildDeviceCommandCreateView(APIView):
             return premium_required_response()
 
         if serializer.validated_data["command_type"] == RemoteDeviceCommand.TYPE_AROUND_START:
-            payload.setdefault("session_token", AroundAudioClip.new_session_token())
+            payload["session_token"] = AroundAudioClip.new_session_token()
+            MonitorSession.objects.create(parent=request.user, child=child, session_token=payload["session_token"], transport="http")
 
         command = RemoteDeviceCommand.objects.create(
             child=child,
@@ -1076,23 +1082,25 @@ class PendingDeviceCommandsView(APIView):
         if request.user.role != User.ROLE_CHILD:
             return Response([])
 
-        commands = list(
-            request.user.device_commands.filter(
-                status=RemoteDeviceCommand.STATUS_PENDING,
-            ).order_by("created_at", "id")[:10]
-        )
-        if commands:
-            now = timezone.now()
-            RemoteDeviceCommand.objects.filter(
-                id__in=[command.id for command in commands],
-                status=RemoteDeviceCommand.STATUS_PENDING,
-            ).update(
-                status=RemoteDeviceCommand.STATUS_DELIVERED,
-                delivered_at=now,
-            )
+        now = timezone.now()
+        request.user.device_commands.filter(status__in=["pending", "delivered"], expires_at__lte=now).update(status="failed", error_message="expired")
+        lease = now - timedelta(seconds=settings.COMMAND_LEASE_SECONDS)
+        with transaction.atomic():
+            commands = list(request.user.device_commands.select_for_update().filter(expires_at__gt=now).filter(
+                Q(status="pending") | Q(status="delivered", delivered_at__lt=lease)).order_by("created_at", "id")[:10])
+            valid = []
             for command in commands:
-                command.status = RemoteDeviceCommand.STATUS_DELIVERED
-                command.delivered_at = now
+                if command.command_type in {"webrtc_monitor_start", "around_start"}:
+                    monitor = MonitorSession.objects.filter(session_token=command.payload.get("session_token"), child=request.user).first()
+                    if not monitor or not session_is_live(monitor):
+                        command.status, command.error_message = "failed", "session_closed"
+                        command.save(update_fields=["status", "error_message"])
+                        continue
+                command.status, command.delivered_at = "delivered", now
+                command.attempts += 1
+                command.save(update_fields=["status", "delivered_at", "attempts"])
+                valid.append(command)
+            commands = valid
 
         return Response(RemoteDeviceCommandSerializer(commands, many=True).data)
 
@@ -1105,6 +1113,8 @@ class CompleteDeviceCommandView(APIView):
         if request.user.role != User.ROLE_CHILD or command.child_id != request.user.id:
             return Response({"detail": "forbidden"}, status=403)
 
+        if command.status in {"completed", "failed"}:
+            return Response(RemoteDeviceCommandSerializer(command).data)
         serializer = RemoteDeviceCommandCompleteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         success = serializer.validated_data["success"]
@@ -1135,15 +1145,23 @@ class AroundAudioUploadView(APIView):
         if request.user.role != User.ROLE_CHILD:
             return Response({"detail": "children only"}, status=403)
 
-        session_token = (request.data.get("session_token") or "").strip()
+        session_token = str(request.data.get("session_token") or "").strip()
         if not session_token:
             return Response({"detail": "session_token is required"}, status=400)
+        recording = authorized_session(request.user, session_token, require_consent=True)
+        if recording.child_id != request.user.pk:
+            raise PermissionDenied("children only")
 
         uploaded = request.FILES.get("audio")
         if uploaded is None:
             return Response({"detail": "audio file is required"}, status=400)
 
-        duration_seconds = int(request.data.get("duration_seconds") or 0)
+        if uploaded.size > settings.UPLOAD_MAX_BYTES or uploaded.content_type not in {"audio/mp4", "audio/m4a", "audio/aac", "audio/wav", "audio/x-wav", "audio/mpeg"}:
+            return Response({"detail": "Invalid or oversized audio upload"}, status=400)
+        try:
+            duration_seconds = min(int(request.data.get("duration_seconds") or 0), settings.MONITOR_SESSION_MAX_SECONDS)
+        except (ValueError, TypeError):
+            return Response({"detail": "invalid duration_seconds"}, status=400)
         clip = AroundAudioClip.objects.create(
             child=request.user,
             session_token=session_token,
@@ -1224,6 +1242,9 @@ class AroundAudioLiveUploadView(APIView):
         session_token = (request.query_params.get("session_token") or "").strip()
         if not session_token:
             return Response({"detail": "session_token is required"}, status=400)
+        recording = authorized_session(request.user, session_token, require_consent=True)
+        if recording.child_id != request.user.pk:
+            raise PermissionDenied("children only")
 
         sample_rate = _coerce_positive_int(
             request.headers.get("X-Audio-Sample-Rate"),
@@ -1250,7 +1271,7 @@ class AroundAudioLiveUploadView(APIView):
         byte_count = 0
         try:
             stream = request.META["wsgi.input"]
-            while True:
+            while session_is_live(recording):
                 chunk = stream.read(4096)
                 if not chunk:
                     break
@@ -1307,6 +1328,7 @@ class AroundAudioLiveStreamView(APIView):
         if not session_token:
             return Response({"detail": "session_token is required"}, status=400)
 
+        authorized_session(request.user, session_token)
         session = live_audio_broker.get_or_create(
             session_token,
             child_id=child.id,
@@ -1345,6 +1367,10 @@ class ActivateMonitoringView(APIView):
             return premium_required_response()
 
         child_id = request.data.get("child_id")
+        try:
+            child_id = int(child_id)
+        except (ValueError, TypeError):
+            return Response({"detail": "invalid child_id"}, status=400)
         if not child_id:
             return Response({"detail": "child_id required"}, status=400)
 
@@ -1388,44 +1414,56 @@ class ActivateMonitoringView(APIView):
 
 
 class DeactivateMonitoringView(APIView):
-    """Parent closes the MonitorSession and notifies the child via FCM."""
-    permission_classes = [IsAuthenticated]
-
     def post(self, request):
-        if request.user.role != User.ROLE_PARENT:
-            return Response({"detail": "parents only"}, status=403)
-        if not has_premium_access(request.user):
-            return premium_required_response()
-
-        session_token = (request.data.get("session_token") or "").strip()
+        token = str(request.data.get("session_token") or "")
         child_id = request.data.get("child_id")
-
-        if session_token:
-            MonitorSession.objects.filter(
-                session_token=session_token,
-                parent=request.user,
-            ).exclude(status=MonitorSession.STATUS_CLOSED).update(
-                status=MonitorSession.STATUS_CLOSED,
-            )
-
-        if child_id:
-            child = get_object_or_404(User, id=child_id, role=User.ROLE_CHILD)
-            RemoteDeviceCommand.objects.create(
-                child=child,
-                created_by=request.user,
-                command_type=RemoteDeviceCommand.TYPE_WEBRTC_MONITOR_STOP,
-                payload={"session_token": session_token},
-            )
-            if child.fcm_token:
-                send_command_push(
-                    child.fcm_token,
-                    "webrtc_monitor_stop",
-                    extra_data={
-                        "session_token": session_token,
-                    },
-                )
-
+        if child_id is not None:
+            try:
+                child_id = int(child_id)
+            except (ValueError, TypeError):
+                return Response({"detail": "invalid child_id"}, status=400)
+        if not token and not child_id:
+            return Response({"detail": "session_token or child_id required"}, status=400)
+        if token:
+            session = authorized_session(request.user, token, allow_closed=True)
+            if child_id and str(child_id) != str(session.child_id):
+                raise PermissionDenied("Session and child do not match.")
+            sessions = [session]
+        else:
+            child = get_object_or_404(User, pk=child_id, parent=request.user, role=User.ROLE_CHILD)
+            sessions = list(MonitorSession.objects.filter(parent=request.user, child=child).exclude(status="closed"))
+        for session in sessions:
+            close_session(session)
+            command = RemoteDeviceCommand.objects.create(child=session.child, created_by=request.user,
+                command_type="webrtc_monitor_stop", payload={"session_token": session.session_token})
+            if session.child.fcm_token:
+                send_command_push(session.child.fcm_token, command.command_type, extra_data=command.payload)
         return Response({"detail": "ok"})
+
+
+class MonitorConsentView(APIView):
+    def post(self, request):
+        session = authorized_session(request.user, request.data.get("session_token", ""))
+        if request.user.pk != session.child_id:
+            raise PermissionDenied("The child must confirm on their own device.")
+        approved = request.data.get("approved")
+        if not isinstance(approved, bool):
+            return Response({"detail": "approved must be boolean"}, status=400)
+        with transaction.atomic():
+            session = MonitorSession.objects.select_for_update().get(pk=session.pk)
+            if not session_is_live(session):
+                return Response({"detail": "session expired"}, status=410)
+            if not approved:
+                close_session(session)
+            elif session.consented_at is None:
+                if session.transport == "http":
+                    session.status = MonitorSession.STATUS_ACTIVE
+                session.consented_at = timezone.now()
+                session.child_last_seen = timezone.now()
+                session.parent_last_seen = timezone.now()
+                session.expires_at = timezone.now() + timedelta(seconds=settings.MONITOR_SESSION_MAX_SECONDS)
+                session.save(update_fields=["status", "consented_at", "child_last_seen", "parent_last_seen", "expires_at"])
+        return Response({"approved": approved, "expires_at": session.expires_at, "transport": session.transport})
 
 
 class MonitorSignalSendView(APIView):
@@ -1436,8 +1474,8 @@ class MonitorSignalSendView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        session_token = (request.data.get("session_token") or "").strip()
-        msg_type = (request.data.get("type") or "").strip()
+        session_token = str(request.data.get("session_token") or "").strip()
+        msg_type = str(request.data.get("type") or "").strip()
         payload = request.data.get("payload")
 
         if not session_token or not msg_type or payload is None:
@@ -1446,11 +1484,20 @@ class MonitorSignalSendView(APIView):
                 status=400,
             )
 
-        session = get_object_or_404(
-            MonitorSession,
-            session_token=session_token,
-        )
-
+        session = authorized_session(request.user, session_token)
+        if msg_type not in {"offer", "answer", "ice_candidate", "error"} or not isinstance(payload, dict) or len(json.dumps(payload)) > 65536:
+            return Response({"detail": "invalid signaling payload"}, status=400)
+        if msg_type in {"offer", "answer"} and (not isinstance(payload.get("sdp"), str) or not 1 <= len(payload["sdp"]) <= 60000):
+            return Response({"detail": "invalid SDP"}, status=400)
+        if msg_type == "ice_candidate" and (not isinstance(payload.get("candidate"), str) or len(payload["candidate"]) > 4096):
+            return Response({"detail": "invalid ICE candidate"}, status=400)
+        generation = payload.get("generation", 1)
+        if not isinstance(generation, int) or isinstance(generation, bool) or not 1 <= generation <= 10000:
+            return Response({"detail": "invalid signaling generation"}, status=400)
+        if msg_type != "error" and session.consented_at is None:
+            return Response({"detail": "child consent required"}, status=409)
+        if msg_type == "offer" and request.user.pk != session.child_id or msg_type == "answer" and request.user.pk != session.parent_id:
+            raise PermissionDenied("Invalid signaling direction.")
         # Determine sender role from the authenticated user.
         if request.user.id == session.parent_id:
             sender_role = "parent"
@@ -1471,12 +1518,11 @@ class MonitorSignalSendView(APIView):
             session.status = MonitorSession.STATUS_ACTIVE
             session.save(update_fields=["status"])
 
-        SignalingMessage.objects.create(
-            session=session,
-            sender_role=sender_role,
-            msg_type=msg_type,
-            payload=payload,
-        )
+        delivery_id = str(request.data.get("message_id") or "")[:64] or None
+        if delivery_id:
+            SignalingMessage.objects.get_or_create(session=session, sender_role=sender_role, client_message_id=delivery_id, defaults={"msg_type": msg_type, "payload": payload})
+        else:
+            SignalingMessage.objects.create(session=session, sender_role=sender_role, msg_type=msg_type, payload=payload)
 
         return Response({"detail": "ok"}, status=201)
 
@@ -1497,11 +1543,11 @@ class MonitorSignalPollView(APIView):
         if not session_token:
             return Response({"detail": "session_token required"}, status=400)
 
-        session = get_object_or_404(
-            MonitorSession,
-            session_token=session_token,
-        )
-
+        session = authorized_session(request.user, session_token, allow_closed=True)
+        if session_is_live(session):
+            field = "parent_last_seen" if request.user.pk == session.parent_id else "child_last_seen"
+            setattr(session, field, timezone.now())
+            session.save(update_fields=[field])
         if request.user.id == session.parent_id:
             other_role = "child"
         elif request.user.id == session.child_id:
@@ -1522,6 +1568,9 @@ class MonitorSignalPollView(APIView):
 
         return Response({
             "session_status": session.status,
+            "consented": session.consented_at is not None,
+            "transport": session.transport,
+            "expires_at": session.expires_at,
             "messages": [
                 {
                     "id": m.id,
@@ -1545,6 +1594,8 @@ class IceServersView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if not has_premium_access(request.user):
+            return premium_required_response()
         ice_servers = [
             {"urls": url} for url in settings.WEBRTC_STUN_URLS
         ]

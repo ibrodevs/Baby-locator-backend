@@ -18,6 +18,29 @@ class RevenueCatWebhookEvent(models.Model):
     )
     raw_payload = models.JSONField(default=dict, blank=True)
     processed_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=16, default="pending", db_index=True)
+    error = models.CharField(max_length=200, blank=True, default="")
 
     def __str__(self):
         return f"{self.event_type}:{self.event_id}"
+
+
+class CustomerEntitlement(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="store_entitlements")
+    product_id = models.CharField(max_length=200)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    lifetime = models.BooleanField(default=False)
+    revoked = models.BooleanField(default=False)
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "product_id"], name="unique_customer_product")]
+
+
+class LiteAccessGrant(models.Model):
+    """Server-owned family license; HTTP headers cannot create this permission."""
+    owner = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="lite_access_grant")
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    source = models.CharField(max_length=32, default="admin")
+    updated_at = models.DateTimeField(auto_now=True)

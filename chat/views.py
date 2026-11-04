@@ -1,7 +1,9 @@
 from django.db.models import Q, Sum
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.parsers import FormParser, MultiPartParser
+from accounts.parsers import ObjectJSONParser as JSONParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -73,6 +75,8 @@ class ChatMessagesView(APIView):
                 {"detail": "text or file is required"}, status=400
             )
 
+        if len(text) > 2000 or uploaded_file and uploaded_file.size > settings.UPLOAD_MAX_BYTES:
+            return Response({"detail": "Message or file is too large."}, status=400)
         user = request.user
         if user.role == User.ROLE_PARENT:
             receiver = child

@@ -1,6 +1,6 @@
 import os
 from datetime import timedelta
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 from accounts.models import InviteCode, User
 
@@ -17,7 +17,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--parent-password",
             type=str,
-            default=os.getenv("PLAY_REVIEW_PARENT_PASSWORD", "ParentReviewerPass2026!"),
+            default=os.getenv("PLAY_REVIEW_PARENT_PASSWORD", ""),
             help="Parent reviewer password",
         )
         parser.add_argument(
@@ -29,7 +29,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--child-password",
             type=str,
-            default=os.getenv("PLAY_REVIEW_CHILD_PASSWORD", "ChildReviewerPass2026!"),
+            default=os.getenv("PLAY_REVIEW_CHILD_PASSWORD", ""),
             help="Child reviewer password",
         )
 
@@ -38,6 +38,9 @@ class Command(BaseCommand):
         p_password = options["parent_password"]
         c_username = options["child_username"].strip()
         c_password = options["child_password"]
+
+        if not p_password or not c_password:
+            raise CommandError("Set unique PLAY_REVIEW_PARENT_PASSWORD and PLAY_REVIEW_CHILD_PASSWORD securely.")
 
         # 1. Parent Account
         parent, p_created = User.objects.get_or_create(
@@ -80,8 +83,8 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS("Google Play reviewer accounts ready:"))
         self.stdout.write(f"  Parent Username: {p_username}")
-        self.stdout.write(f"  Parent Password: {p_password}")
+        self.stdout.write("  Parent password: configured (not printed)")
         self.stdout.write(f"  Child Username:  {c_username}")
-        self.stdout.write(f"  Child Password:  {c_password}")
+        self.stdout.write("  Child password: configured (not printed)")
         self.stdout.write(f"  Active Invite Code: {invite.code if invite else 'N/A'}")
         self.stdout.write(f"  Linked Status:   {'Newly Created' if (p_created or c_created) else 'Verified Existing'}")

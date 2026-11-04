@@ -1,11 +1,11 @@
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+from pathlib import Path
+from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
+
+# Production ENV wins; never search a parent directory for credentials.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 import os
-from pathlib import Path
 
 
 
@@ -24,8 +24,10 @@ def env_list(name, default=None):
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-secret-change-me")
-DEBUG = env_bool("DJANGO_DEBUG", True)
+DEBUG = env_bool("DJANGO_DEBUG", False)
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY or SECRET_KEY == "dev-secret-change-me":
+    raise ImproperlyConfigured("Set a unique DJANGO_SECRET_KEY in the server environment.")
 IS_TEST = env_bool("IS_TEST", False)
 GOOGLE_MAPS_API_KEY = (
     os.getenv("GOOGLE_MAPS_ANDROID_API_KEY")
@@ -33,7 +35,9 @@ GOOGLE_MAPS_API_KEY = (
     or os.getenv("MAPS_API_KEY")
     or ""
 ).strip()
-ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", ["*"])
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", ["localhost", "127.0.0.1"] if DEBUG else [])
+if not DEBUG and (not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS):
+    raise ImproperlyConfigured("Set explicit DJANGO_ALLOWED_HOSTS in production.")
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 
@@ -88,7 +92,7 @@ DATABASES = {
         "ENGINE": os.getenv("DJANGO_DB_ENGINE", "django.db.backends.postgresql"),
         "NAME": os.getenv("DJANGO_DB_NAME", "babydb"),
         "USER": os.getenv("DJANGO_DB_USER", "babyuser"),
-        "PASSWORD": os.getenv("DJANGO_DB_PASSWORD", "StrongPassword123"),
+        "PASSWORD": os.getenv("DJANGO_DB_PASSWORD", ""),
         "HOST": os.getenv("DJANGO_DB_HOST", "localhost"),
         "PORT": os.getenv("DJANGO_DB_PORT", "5432"),
     }
@@ -97,15 +101,19 @@ DATABASES = {
 AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
+    "DEFAULT_PARSER_CLASSES": ["accounts.parsers.ObjectJSONParser", "rest_framework.parsers.FormParser", "rest_framework.parsers.MultiPartParser"],
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "accounts.authentication.EditionTokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle", "rest_framework.throttling.UserRateThrottle"],
+    "DEFAULT_THROTTLE_RATES": {"anon": "60/min", "user": "3000/min", "auth": "15/min", "subscription_sync": "12/min", "integrity": "10/min", "geocoding": "60/min"},
 }
 
-CORS_ALLOW_ALL_ORIGINS = env_bool("DJANGO_CORS_ALLOW_ALL_ORIGINS", DEBUG)
+CORS_ALLOW_ALL_ORIGINS = DEBUG and env_bool("DJANGO_CORS_ALLOW_ALL_ORIGINS", False)
+CORS_ALLOWED_ORIGINS = env_list("DJANGO_CORS_ALLOWED_ORIGINS", [])
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS", [])
 
 LANGUAGE_CODE = "en-us"
@@ -127,9 +135,9 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", True)
     SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_SECURE_HSTS_SECONDS", "31536000"))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool(
-        "DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", True
+        "DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", False
     )
-    SECURE_HSTS_PRELOAD = env_bool("DJANGO_SECURE_HSTS_PRELOAD", True)
+    SECURE_HSTS_PRELOAD = env_bool("DJANGO_SECURE_HSTS_PRELOAD", False)
     CSRF_COOKIE_SECURE = True
     SESSION_COOKIE_SECURE = True
 
@@ -166,16 +174,10 @@ WEBRTC_TURN_TTL_SECONDS = int(os.getenv("WEBRTC_TURN_TTL_SECONDS", "86400"))
 # RevenueCat
 REVENUECAT_PUBLIC_API_KEY_ANDROID = os.getenv(
     "REVENUECAT_PUBLIC_API_KEY_ANDROID",
-    os.getenv("REVENUECAT_PUBLIC_API_KEY", "goog_EqvRQpJxoxPTrEyftuZNYNpXrog"),
+    os.getenv("REVENUECAT_PUBLIC_API_KEY", ""),
 )
-REVENUECAT_PUBLIC_API_KEY_IOS = os.getenv(
-    "REVENUECAT_PUBLIC_API_KEY_IOS",
-    os.getenv("REVENUECAT_PUBLIC_API_KEY", "goog_EqvRQpJxoxPTrEyftuZNYNpXrog"),
-)
-REVENUECAT_PUBLIC_API_KEY_FALLBACK = os.getenv(
-    "REVENUECAT_PUBLIC_API_KEY",
-    "goog_EqvRQpJxoxPTrEyftuZNYNpXrog",
-)
+REVENUECAT_PUBLIC_API_KEY_IOS = os.getenv("REVENUECAT_PUBLIC_API_KEY_IOS", "")
+REVENUECAT_PUBLIC_API_KEY_FALLBACK = os.getenv("REVENUECAT_PUBLIC_API_KEY", "")
 REVENUECAT_ENTITLEMENT_ID = os.getenv(
     "REVENUECAT_ENTITLEMENT_ID",
     "family_security_pro",
@@ -192,7 +194,7 @@ REVENUECAT_PREMIUM_PRODUCT_IDS = env_list(
 )
 REVENUECAT_LIFETIME_PRODUCT_IDS = env_list(
     "REVENUECAT_LIFETIME_PRODUCT_IDS",
-    ["lifetime"],
+    [],
 )
 # RevenueCat webhooks support a configured Authorization header. Store the
 # full expected header value here, for example:
@@ -201,3 +203,30 @@ REVENUECAT_WEBHOOK_AUTH_HEADER = os.getenv(
     "REVENUECAT_WEBHOOK_AUTH_HEADER",
     "",
 )
+
+# Server-only credentials. Never expose these through the public config endpoint.
+REVENUECAT_SECRET_API_KEY = os.getenv("REVENUECAT_SECRET_API_KEY", "")
+REVENUECAT_APP_IDS = env_list("REVENUECAT_APP_IDS", [])
+REVENUECAT_ALLOWED_ENVIRONMENTS = env_list("REVENUECAT_ALLOWED_ENVIRONMENTS", ["PRODUCTION"])
+REVENUECAT_HTTP_TIMEOUT_SECONDS = 8
+MONITOR_REQUEST_TTL_SECONDS = 120
+MONITOR_SESSION_MAX_SECONDS = 600
+MONITOR_HEARTBEAT_TIMEOUT_SECONDS = 45
+COMMAND_LEASE_SECONDS = 20
+COMMAND_TTL_SECONDS = 120
+UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = UPLOAD_MAX_BYTES
+FILE_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 8}},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+# Shared cache required for rate limiting when more than one worker runs.
+REDIS_URL = os.getenv("REDIS_URL", "")
+if REDIS_URL:
+    CACHES = {"default": {"BACKEND": "django.core.cache.backends.redis.RedisCache", "LOCATION": REDIS_URL}}
+LIVE_AUDIO_REDIS_URL = os.getenv("LIVE_AUDIO_REDIS_URL", REDIS_URL)
+
+GOOGLE_GEOCODING_API_KEY = os.getenv("GOOGLE_GEOCODING_API_KEY", "")
+FIREBASE_EXPECTED_PROJECT_ID = os.getenv("FIREBASE_EXPECTED_PROJECT_ID", "")

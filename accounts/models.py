@@ -1,5 +1,4 @@
-import random
-import string
+import secrets
 
 from django.contrib.auth.models import AbstractUser
 from django.db import models
@@ -43,6 +42,7 @@ class User(AbstractUser):
     premium_product_id = models.CharField(max_length=128, blank=True, default="")
     premium_expires_at = models.DateTimeField(null=True, blank=True)
     premium_updated_at = models.DateTimeField(null=True, blank=True)
+    premium_synced_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.username} ({self.role})"
@@ -74,7 +74,7 @@ class InviteCode(models.Model):
 
     @staticmethod
     def generate_code():
-        return "".join(random.choices(string.digits, k=6))
+        return f"{secrets.randbelow(1_000_000):06d}"
 
     @property
     def is_valid(self):
@@ -84,3 +84,22 @@ class InviteCode(models.Model):
         if self.child_id:
             return f"{self.code} (child={self.child.username})"
         return f"{self.code} (parent={self.parent.username})"
+
+
+class DeviceInstallation(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="installations")
+    installation_id = models.CharField(max_length=64)
+    fcm_token = models.CharField(max_length=512, unique=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "installation_id"], name="unique_user_installation")]
+
+
+class ExternalAccountDeletion(models.Model):
+    """Minimal outbox survives account deletion until the provider confirms erasure."""
+    app_user_id = models.CharField(max_length=128, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=64, blank=True)

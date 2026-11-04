@@ -1,5 +1,6 @@
 import logging
 import os
+from datetime import timedelta
 
 from django.conf import settings
 
@@ -29,8 +30,15 @@ def _ensure_firebase():
             logger.warning("Firebase service account key not found at %s", key_path)
             return False
 
+        import json
+        with open(key_path, encoding="utf-8") as key_file:
+            metadata = json.load(key_file)
+        if settings.FIREBASE_EXPECTED_PROJECT_ID and metadata.get("project_id") != settings.FIREBASE_EXPECTED_PROJECT_ID:
+            logger.error("Firebase credential project does not match FIREBASE_EXPECTED_PROJECT_ID")
+            return False
         cred = credentials.Certificate(key_path)
-        firebase_admin.initialize_app(cred)
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(cred)
         _firebase_initialized = True
         return True
     except Exception as e:
@@ -64,7 +72,7 @@ def _apns_aps_payload(messaging, *, notification_type: str, title: str, body: st
     )
 
 
-def send_command_push(fcm_token: str, command_type: str, extra_data=None):
+def _send_command_push_single(fcm_token: str, command_type: str, extra_data=None):
     """Send a high-priority data-only FCM message to wake the child device."""
     if not fcm_token:
         return
@@ -84,6 +92,7 @@ def send_command_push(fcm_token: str, command_type: str, extra_data=None):
             token=fcm_token,
             android=messaging.AndroidConfig(
                 priority="high",
+                ttl=timedelta(seconds=120),
             ),
             apns=messaging.APNSConfig(
                 headers=_apns_headers(push_type="background", priority="5"),
@@ -97,10 +106,10 @@ def send_command_push(fcm_token: str, command_type: str, extra_data=None):
         response = messaging.send(message)
         logger.info("FCM %s push sent: %s", command_type, response)
     except Exception as e:
-        logger.error("FCM send failed: %s", e)
+        _handle_send_error(fcm_token, e)
 
 
-def send_notification_push(fcm_token: str, notification_type: str, title: str, body: str, extra_data=None):
+def _send_notification_push_single(fcm_token: str, notification_type: str, title: str, body: str, extra_data=None):
     """Send a high-priority notification FCM message to the parent device."""
     if not fcm_token:
         return
@@ -129,6 +138,7 @@ def send_notification_push(fcm_token: str, notification_type: str, title: str, b
                 token=fcm_token,
                 android=messaging.AndroidConfig(
                     priority="high",
+                ttl=timedelta(seconds=120),
                 ),
                 apns=messaging.APNSConfig(
                     headers=_apns_headers(),
@@ -155,6 +165,7 @@ def send_notification_push(fcm_token: str, notification_type: str, title: str, b
             token=fcm_token,
             android=messaging.AndroidConfig(
                 priority="high",
+                ttl=timedelta(seconds=120),
                 notification=messaging.AndroidNotification(
                     channel_id="kid_security_activity_alerts",
                     sound="default",
@@ -175,4 +186,34 @@ def send_notification_push(fcm_token: str, notification_type: str, title: str, b
         response = messaging.send(message)
         logger.info("FCM notification %s push sent: %s", notification_type, response)
     except Exception as e:
-        logger.error("FCM notification send failed: %s", e)
+        _handle_send_error(fcm_token, e)
+
+
+def _handle_send_error(token, error):
+    from accounts.models import DeviceInstallation, User
+    code = getattr(error, "code", type(error).__name__)
+    logger.warning("FCM delivery failed: code=%s", code)
+    if type(error).__name__ == "UnregisteredError":
+        DeviceInstallation.objects.filter(fcm_token=token).delete()
+        for user in User.objects.filter(fcm_token=token):
+            user.fcm_token = user.installations.values_list("fcm_token", flat=True).first() or ""
+            user.save(update_fields=["fcm_token"])
+
+
+def _installation_tokens(legacy_token):
+    from accounts.models import DeviceInstallation, User
+    owner = DeviceInstallation.objects.filter(fcm_token=legacy_token).values_list("user_id", flat=True).first()
+    if owner is None:
+        owner = User.objects.filter(fcm_token=legacy_token).values_list("pk", flat=True).first()
+    tokens = list(DeviceInstallation.objects.filter(user_id=owner).values_list("fcm_token", flat=True)) if owner else []
+    return list(dict.fromkeys(tokens or ([legacy_token] if legacy_token else [])))
+
+
+def send_command_push(fcm_token, command_type, extra_data=None):
+    for token in _installation_tokens(fcm_token):
+        _send_command_push_single(token, command_type, extra_data)
+
+
+def send_notification_push(fcm_token, notification_type, title, body, extra_data=None):
+    for token in _installation_tokens(fcm_token):
+        _send_notification_push_single(token, notification_type, title, body, extra_data)

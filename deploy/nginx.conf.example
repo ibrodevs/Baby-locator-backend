@@ -1,0 +1,47 @@
+# Replace host/certificate/static path. Keep the application port private.
+server {
+    listen 80;
+    server_name <YOUR_API_HOST>;
+    return 301 https://$host$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name <YOUR_API_HOST>;
+    ssl_certificate <YOUR_TLS_CHAIN_PATH>;
+    ssl_certificate_key <YOUR_TLS_KEY_PATH>;
+    client_max_body_size 12m;
+    client_body_timeout 30s;
+    # No public media alias: /media/ is an authenticated Django endpoint.
+    location /static/ { alias /srv/baby-locator/backend/staticfiles/; }
+    location = /api/around-audio/live/upload/ {
+        client_max_body_size 25m;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 650s;
+        proxy_send_timeout 650s;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://127.0.0.1:8000;
+    }
+    location ~ ^/api/children/[0-9]+/around-audio/live/stream/ {
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 650s;
+        gzip off;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://127.0.0.1:8000;
+    }
+    location / {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 30s;
+        proxy_pass http://127.0.0.1:8000;
+    }
+}

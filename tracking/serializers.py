@@ -1,4 +1,14 @@
+import math
+from django.utils import timezone
 from rest_framework import serializers
+
+class FiniteFloatField(serializers.FloatField):
+    def to_internal_value(self, data):
+        value = super().to_internal_value(data)
+        if not math.isfinite(value):
+            self.fail("invalid")
+        return value
+
 
 from .models import (
     Alert,
@@ -15,6 +25,11 @@ from .models import (
 
 
 class LocationSerializer(serializers.ModelSerializer):
+    active = serializers.SerializerMethodField()
+
+    def get_active(self, obj):
+        return bool(obj.active and not obj.is_cached and timezone.now() - obj.captured_at <= timezone.timedelta(minutes=2))
+
     class Meta:
         model = LocationUpdate
         fields = [
@@ -26,21 +41,32 @@ class LocationSerializer(serializers.ModelSerializer):
             "battery",
             "charging",
             "active",
-            "created_at",
+            "created_at", "captured_at", "accuracy", "is_cached",
         ]
         read_only_fields = ["id", "child", "created_at"]
 
 
 class LocationInputSerializer(serializers.Serializer):
-    lat = serializers.FloatField()
-    lng = serializers.FloatField()
+    lat = FiniteFloatField(min_value=-90, max_value=90)
+    lng = FiniteFloatField(min_value=-180, max_value=180)
     address = serializers.CharField(required=False, allow_blank=True, default="")
-    battery = serializers.IntegerField(required=False, allow_null=True)
+    battery = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=100)
     charging = serializers.BooleanField(required=False, default=False)
     active = serializers.BooleanField(required=False, default=True)
+    captured_at = serializers.DateTimeField(required=False)
+    accuracy = FiniteFloatField(required=False, allow_null=True, min_value=0, max_value=100000)
+    is_cached = serializers.BooleanField(required=False, default=False)
+
+    def validate_captured_at(self, value):
+        if value > timezone.now() + timezone.timedelta(minutes=2):
+            raise serializers.ValidationError("Location timestamp is in the future.")
+        return value
 
 
 class SafeZoneSerializer(serializers.ModelSerializer):
+    lat = FiniteFloatField(min_value=-90, max_value=90)
+    lng = FiniteFloatField(min_value=-180, max_value=180)
+    radius = FiniteFloatField(min_value=10, max_value=100000, required=False)
     schedule_type = serializers.ChoiceField(
         choices=SafeZone.SCHEDULE_CHOICES,
         required=False,

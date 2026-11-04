@@ -1,4 +1,6 @@
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
@@ -8,6 +10,7 @@ from .models import InviteCode, User
 
 class UserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
+    is_premium = serializers.SerializerMethodField()
     has_joined = serializers.SerializerMethodField()
     active_invite_code = serializers.SerializerMethodField()
     invite_expires_at = serializers.SerializerMethodField()
@@ -30,6 +33,10 @@ class UserSerializer(serializers.ModelSerializer):
             "premium_product_id",
             "premium_expires_at",
         ]
+
+    def get_is_premium(self, obj):
+        from subscriptions.services import has_premium_access
+        return has_premium_access(obj)
 
     def get_avatar_url(self, obj):
         if obj.avatar:
@@ -78,8 +85,15 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterParentSerializer(serializers.Serializer):
     username = serializers.CharField()
-    password = serializers.CharField(write_only=True, min_length=4)
+    password = serializers.CharField(write_only=True, min_length=8)
     display_name = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_password(self, value):
+        try:
+            validate_password(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from None
+        return value
 
     def create(self, validated_data):
         if User.objects.filter(username=validated_data["username"]).exists():
@@ -114,7 +128,7 @@ class CreateChildSerializer(serializers.Serializer):
         write_only=True,
         required=False,
         allow_blank=True,
-        min_length=4,
+        min_length=8,
     )
     display_name = serializers.CharField(required=False, allow_blank=True)
     gender = serializers.CharField(required=False, allow_blank=True)
@@ -127,10 +141,10 @@ class CreateChildSerializer(serializers.Serializer):
         if username:
             if User.objects.filter(username=username).exists():
                 raise serializers.ValidationError({"username": "already taken"})
-            if len(password) < 4:
-                raise serializers.ValidationError(
-                    {"password": "Ensure this field has at least 4 characters."}
-                )
+            try:
+                validate_password(password)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError({"password": exc.messages}) from None
             attrs["username"] = username
         else:
             attrs.pop("username", None)

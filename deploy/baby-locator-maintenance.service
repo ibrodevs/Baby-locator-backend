@@ -1,0 +1,12 @@
+[Unit]
+Description=Baby Locator deletion and webhook maintenance
+After=network.target
+[Service]
+Type=oneshot
+User=baby-locator
+Group=baby-locator
+WorkingDirectory=/srv/baby-locator/backend
+EnvironmentFile=/etc/baby-locator/backend.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/bin/sh /srv/baby-locator/backend/deploy/run-maintenance.sh
+UMask=0077
