@@ -126,7 +126,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Media files (avatars)
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+media_root_env = os.getenv("DJANGO_MEDIA_ROOT")
+if media_root_env and not Path(media_root_env).is_absolute():
+    raise ImproperlyConfigured("DJANGO_MEDIA_ROOT must be an absolute path")
+MEDIA_ROOT = Path(media_root_env) if media_root_env else BASE_DIR / "media"
 
 USE_X_FORWARDED_HOST = True
 
