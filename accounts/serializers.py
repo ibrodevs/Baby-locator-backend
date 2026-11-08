@@ -11,6 +11,8 @@ from .models import InviteCode, User
 class UserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
     is_premium = serializers.SerializerMethodField()
+    premium_expires_at = serializers.SerializerMethodField()
+    premium_access_source = serializers.SerializerMethodField()
     has_joined = serializers.SerializerMethodField()
     active_invite_code = serializers.SerializerMethodField()
     invite_expires_at = serializers.SerializerMethodField()
@@ -29,6 +31,7 @@ class UserSerializer(serializers.ModelSerializer):
             "active_invite_code",
             "invite_expires_at",
             "is_premium",
+            "premium_access_source",
             "premium_entitlement",
             "premium_product_id",
             "premium_expires_at",
@@ -37,6 +40,47 @@ class UserSerializer(serializers.ModelSerializer):
     def get_is_premium(self, obj):
         from subscriptions.services import has_premium_access
         return has_premium_access(obj)
+
+
+    def _active_family_grant(self, obj):
+        from subscriptions.models import LiteAccessGrant
+        from subscriptions.services import subscription_owner_for
+
+        owner = subscription_owner_for(obj)
+        if owner is None:
+            return None
+
+        return LiteAccessGrant.objects.filter(
+            owner_id=owner.pk,
+            revoked_at__isnull=True,
+            expires_at__gt=timezone.now(),
+        ).first()
+
+    def get_premium_access_source(self, obj):
+        if self._active_family_grant(obj) is not None:
+            return "administrative"
+
+        from subscriptions.services import has_premium_access
+        return "local_premium" if has_premium_access(obj) else "none"
+
+    def get_premium_expires_at(self, obj):
+        from subscriptions.services import subscription_owner_for
+
+        owner = subscription_owner_for(obj)
+        if owner is None:
+            return None
+
+        grant = self._active_family_grant(obj)
+        expiry = (
+            grant.expires_at
+            if grant is not None
+            else owner.premium_expires_at
+        )
+
+        if expiry is None:
+            return None
+
+        return serializers.DateTimeField().to_representation(expiry)
 
     def get_avatar_url(self, obj):
         if obj.avatar:
