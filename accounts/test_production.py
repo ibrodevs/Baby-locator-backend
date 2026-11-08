@@ -44,16 +44,16 @@ class AccountSecurityTests(APITestCase):
         with tempfile.TemporaryDirectory() as directory, override_settings(MEDIA_ROOT=directory):
             message=Message.objects.create(sender=self.parent,receiver=self.child,file=SimpleUploadedFile('file.txt',b'private'))
             path='/media/'+message.file.name
-            self.assertEqual(self.client.get(path).status_code,401)
+            self.assertEqual(self.client.get(path, secure=True).status_code,401)
             self.client.force_authenticate(self.child)
-            response=self.client.get(path);self.assertEqual(response.status_code,200); from django.core.signals import request_finished
+            response=self.client.get(path, secure=True);self.assertEqual(response.status_code,200); from django.core.signals import request_finished
             from django.db import close_old_connections
             request_finished.disconnect(close_old_connections)
             try: response.close()
             finally: request_finished.connect(close_old_connections)
             other=User.objects.create_user(username='other-security',role='parent')
             self.client.force_authenticate(other)
-            self.assertEqual(self.client.get(path).status_code,404)
+            self.assertEqual(self.client.get(path, secure=True).status_code,404)
 
     def test_child_deletion_cleans_chat_file_and_event_pii(self):
         with tempfile.TemporaryDirectory() as directory, override_settings(MEDIA_ROOT=directory):
@@ -65,3 +65,50 @@ class AccountSecurityTests(APITestCase):
                 self.assertEqual(self.client.delete(f'/api/auth/children/{self.child.pk}/').status_code,204)
             self.assertFalse(storage.exists(name))
             event.refresh_from_db();self.assertEqual(event.raw_payload,{})
+
+    def test_media_with_real_token_header(self):
+        with tempfile.TemporaryDirectory() as directory, override_settings(MEDIA_ROOT=directory):
+            message = Message.objects.create(
+                sender=self.parent,
+                receiver=self.child,
+                file=SimpleUploadedFile("token-test.txt", b"private"),
+            )
+            path = "/media/" + message.file.name
+
+            # Anonymous request must not retrieve the file.
+            self.client.credentials()
+            self.assertEqual(
+                self.client.get(path, secure=True).status_code,
+                401,
+            )
+
+            # Real DRF token header must allow the file owner.
+            self.client.credentials(
+                HTTP_AUTHORIZATION="Token " + self.token.key
+            )
+            response = self.client.get(path, secure=True)
+            self.assertEqual(response.status_code, 200)
+
+            from django.core.signals import request_finished
+            from django.db import close_old_connections
+
+            request_finished.disconnect(close_old_connections)
+            try:
+                response.close()
+            finally:
+                request_finished.connect(close_old_connections)
+
+            # A valid token belonging to another family is insufficient.
+            stranger = User.objects.create_user(
+                username="media-stranger",
+                role="parent",
+            )
+            stranger_token = Token.objects.create(user=stranger)
+
+            self.client.credentials(
+                HTTP_AUTHORIZATION="Token " + stranger_token.key
+            )
+            self.assertEqual(
+                self.client.get(path, secure=True).status_code,
+                404,
+            )
