@@ -14,7 +14,7 @@ def initialize_existing_rows(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('tracking', '0016_add_safe_zone_enter_alert_type'),
+        ('tracking', '0017_alter_appicon_id'),
     ]
 
     operations = [

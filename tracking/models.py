@@ -198,7 +198,7 @@ class BlockedApp(models.Model):
 
 
 class AppIcon(models.Model):
-    id = models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")
+    id = models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")
     """Cached PNG icon (base64) for an app installed on the child's device."""
 
     child = models.ForeignKey(
